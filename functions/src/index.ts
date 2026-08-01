@@ -19,6 +19,12 @@ import {
 } from "@codra/protocol";
 import { adminAuth, adminDb } from "./runtime";
 export { issueTurnCredentials } from "./turn";
+export {
+  authorizeDesktopLogin,
+  desktopLoginCancel,
+  desktopLoginRedeem,
+  desktopLoginStart,
+} from "./desktop-login";
 import {
   DeviceRegistrationInputSchema,
   parseCallableInput,
