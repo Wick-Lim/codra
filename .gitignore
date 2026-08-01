@@ -6,3 +6,15 @@ test-results/
 .DS_Store
 .superpowers/
 .worktrees/
+.firebase/
+firebase-emulator-data/
+functions-deploy/lib/
+functions-deploy/vendor/
+functions-deploy/functions-component-manifest.json
+apps/desktop/out-remote-test/
+apps/desktop/dist-remote-test/
+apps/desktop/remote-test-provenance.json
+.pnpm-store/
+apps/web/dist/
+functions/dist/
+packages/*/dist/

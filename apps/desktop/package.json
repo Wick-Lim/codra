@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:remote-test": "electron-vite build --config electron.remote-test.vite.config.ts",
     "package:dir": "node ../../scripts/package-macos.mjs",
     "package:mac": "node ../../scripts/package-macos.mjs --release",
     "test": "vitest run",
@@ -15,9 +16,13 @@
   },
   "dependencies": {
     "@codra/protocol": "workspace:*",
+    "@codra/firebase": "workspace:*",
+    "@codra/webrtc": "workspace:*",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "better-sqlite3": "13.0.2",
+    "firebase": "12.17.0",
+    "node-datachannel": "0.32.3",
     "node-pty": "1.1.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"

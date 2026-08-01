@@ -1,0 +1,24 @@
+lockfileVersion: "9.0"
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+  .:
+    dependencies:
+      "@codra/protocol":
+        specifier: file:vendor/codra-protocol-0.0.1.tgz
+        version: file:vendor/codra-protocol-0.0.1.tgz
+
+packages:
+  "@codra/protocol@file:vendor/codra-protocol-0.0.1.tgz":
+    resolution:
+      {
+        integrity: sha512-CNvPRTRkSw+CFbK5d57R0PqSwfxdgXLx1zZmd0JPdKa+hSAdTF+nW9Lym7i4gYkmH3Jb0TMYJ7jVMqCbhy7btA==,
+        tarball: file:vendor/codra-protocol-0.0.1.tgz,
+      }
+    version: 0.0.1
+
+snapshots:
+  "@codra/protocol@file:vendor/codra-protocol-0.0.1.tgz": {}

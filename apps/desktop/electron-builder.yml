@@ -12,6 +12,7 @@ files:
 asarUnpack:
   - node_modules/node-pty/**/*
   - node_modules/better-sqlite3/**/*
+  - node_modules/node-datachannel/**/*
 
 extraResources:
   - from: dist/package-provenance.json

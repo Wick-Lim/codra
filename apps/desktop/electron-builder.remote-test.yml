@@ -1,0 +1,31 @@
+appId: com.codra.desktop.remote-test
+productName: CODRA Remote Test
+asar: true
+
+extraMetadata:
+  main: ./out-remote-test/main/index.js
+
+directories:
+  output: dist-remote-test
+
+files:
+  - out-remote-test/**/*
+  - package.json
+
+asarUnpack:
+  - node_modules/node-pty/**/*
+  - node_modules/better-sqlite3/**/*
+  - node_modules/node-datachannel/**/*
+
+extraResources:
+  - from: remote-test-provenance.json
+    to: remote-test-provenance.json
+
+afterPack: ../../scripts/ensure-remote-test-after-pack.mjs
+
+mac:
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  identity: null
+  target:
+    - target: dir

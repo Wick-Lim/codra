@@ -19,5 +19,9 @@ export default defineConfig({
       name: "packaged-electron",
       testMatch: "packaged-terminal.spec.ts",
     },
+    {
+      name: "packaged-native-modules",
+      testMatch: "packaged-native-modules.spec.ts",
+    },
   ],
 });
