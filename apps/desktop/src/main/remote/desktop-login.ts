@@ -22,6 +22,7 @@ import type { HostIdentity } from "./host-identity";
 const CALLBACK_PATH = "/auth/callback" as const;
 const BRIDGE_URL = "https://codra-1b3bb.firebaseapp.com/desktop-auth";
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
+const CANCEL_TIMEOUT_MS = 1_000;
 const MAX_CALLBACK_TARGET_BYTES = 4 * 1024;
 const PLACEHOLDER_SIGNATURE = encodeBase64Url(new Uint8Array(64));
 
@@ -260,11 +261,13 @@ async function postDesktopLoginJson(
   dependencies: DesktopLoginDependencies,
   url: string,
   body: unknown,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const response = await dependencies.fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
   const payload = await response.json().catch(() => undefined);
   if (!response.ok) throw new Error("DESKTOP_LOGIN_FUNCTION_REQUEST_FAILED");
@@ -277,15 +280,28 @@ async function cancelDesktopLogin(
   attemptId: string,
   state: string,
 ): Promise<void> {
+  const abort = new AbortController();
+  let cancelTimer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await postDesktopLoginJson(
-      dependencies,
-      desktopLoginFunctionUrl(runtime, "desktopLoginCancel"),
-      { attemptId, state },
-    );
+    await Promise.race([
+      postDesktopLoginJson(
+        dependencies,
+        desktopLoginFunctionUrl(runtime, "desktopLoginCancel"),
+        { attemptId, state },
+        abort.signal,
+      ),
+      new Promise<void>((resolve) => {
+        cancelTimer = setTimeout(() => {
+          abort.abort();
+          resolve();
+        }, CANCEL_TIMEOUT_MS);
+      }),
+    ]);
   } catch {
     // The original bounded error is more useful than a best-effort cancel
     // failure, and transactions still have a server-enforced expiry.
+  } finally {
+    if (cancelTimer) clearTimeout(cancelTimer);
   }
 }
 
@@ -296,21 +312,35 @@ export async function bootstrapProductionDesktopLogin(
 ): Promise<DesktopLoginBootstrapResult> {
   const dependencies = { ...desktopLoginDefaults, ...overrides };
   const attemptId = dependencies.randomUUID();
-  const state = createPkceVerifier(dependencies.randomBytes(32));
-  const verifier = createPkceVerifier(dependencies.randomBytes(32));
-  const nonce = createPkceVerifier(dependencies.randomBytes(32));
+  let state = createPkceVerifier(dependencies.randomBytes(32));
+  let verifier = createPkceVerifier(dependencies.randomBytes(32));
+  let nonce = createPkceVerifier(dependencies.randomBytes(32));
   let listener: DesktopLoginCallbackListener | undefined;
   let callbackResult:
     | Promise<{ value: DesktopLoginCallback } | { error: unknown }>
     | undefined;
-  let started = false;
+  let cancelEligible = false;
   let completed = false;
+  const abort = new AbortController();
+  let rejectDeadline!: (error: Error) => void;
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject;
+  });
+  // The deadline remains rejected after it wins one race; attach a handler so
+  // a timeout between sequential boundary calls is never an unhandled promise.
+  void deadline.catch(() => undefined);
+  const deadlineTimer = setTimeout(() => {
+    abort.abort();
+    rejectDeadline(new Error("DESKTOP_LOGIN_TIMEOUT"));
+  }, dependencies.timeoutMs);
+  const bounded = <T>(work: Promise<T>): Promise<T> =>
+    Promise.race([work, deadline]);
   try {
-    listener = await createDesktopLoginCallbackListener({
+    listener = await bounded(createDesktopLoginCallbackListener({
       attemptId,
       state,
       timeoutMs: dependencies.timeoutMs,
-    });
+    }));
     callbackResult = listener.waitForCallback().then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
@@ -334,19 +364,26 @@ export async function bootstrapProductionDesktopLogin(
       buildDesktopLoginStartSigningPayload(unsignedStart),
     );
     const start = { ...unsignedStart, startSignature };
-    const startResponse = await postDesktopLoginJson(
-      dependencies,
-      desktopLoginFunctionUrl(runtime, "desktopLoginStart"),
-      start,
+    // A lost or malformed start response may still have created the server
+    // transaction, so cancellation must be attempted from this point onward.
+    cancelEligible = true;
+    const startResponse = await bounded(
+      postDesktopLoginJson(
+        dependencies,
+        desktopLoginFunctionUrl(runtime, "desktopLoginStart"),
+        start,
+        abort.signal,
+      ),
     );
     const serverNonce =
       startResponse && typeof startResponse === "object"
         ? (startResponse as { serverNonce?: unknown }).serverNonce
         : undefined;
     if (serverNonce !== nonce) throw new Error("DESKTOP_LOGIN_START_INVALID");
-    started = true;
-    await dependencies.openExternal(createDesktopLoginBridgeUrl(attemptId, state));
-    const callbackOutcome = await callbackResult;
+    await bounded(
+      dependencies.openExternal(createDesktopLoginBridgeUrl(attemptId, state)),
+    );
+    const callbackOutcome = await bounded(callbackResult);
     if ("error" in callbackOutcome) throw callbackOutcome.error;
     const callback = callbackOutcome.value;
     const unsignedRedeem = {
@@ -366,17 +403,26 @@ export async function bootstrapProductionDesktopLogin(
       }),
     );
     const result = DesktopLoginRedeemResponseSchema.parse(
-      await postDesktopLoginJson(
-        dependencies,
-        desktopLoginFunctionUrl(runtime, "desktopLoginRedeem"),
-        { ...unsignedRedeem, deviceSignature },
+      await bounded(
+        postDesktopLoginJson(
+          dependencies,
+          desktopLoginFunctionUrl(runtime, "desktopLoginRedeem"),
+          { ...unsignedRedeem, deviceSignature },
+          abort.signal,
+        ),
       ),
     );
     completed = true;
     return result;
   } finally {
+    clearTimeout(deadlineTimer);
     await listener?.close();
-    if (started && !completed)
+    if (cancelEligible && !completed)
       await cancelDesktopLogin(runtime, dependencies, attemptId, state);
+    // Nothing is persisted, and clearing these short-lived values removes
+    // their references once the bootstrap promise settles.
+    state = "";
+    verifier = "";
+    nonce = "";
   }
 }

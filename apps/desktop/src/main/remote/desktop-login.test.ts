@@ -189,10 +189,83 @@ describe("desktop login loopback", () => {
       bootstrapProductionDesktopLogin(runtime, { identity, action: "register" }, {
         fetch,
         openExternal: async () => undefined,
-        timeoutMs: 1,
+        timeoutMs: 25,
       }),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
     expect(calls.map((call) => call.url)).toEqual([
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
+    ]);
+  });
+
+  it("cancels when a start response is malformed after a transaction may exist", async () => {
+    const runtime = productionRuntime();
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string) => {
+      calls.push(url);
+      if (url.endsWith("desktopLoginStart"))
+        return new Response(JSON.stringify({ serverNonce: "wrong" }), { status: 200 });
+      return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
+    });
+
+    await expect(
+      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
+        fetch,
+        openExternal: async () => undefined,
+        timeoutMs: 500,
+      }),
+    ).rejects.toThrow("DESKTOP_LOGIN_START_INVALID");
+    expect(calls).toEqual([
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
+    ]);
+  });
+
+  it("bounds a hanging system-browser launch and cancels the attempt", async () => {
+    const runtime = productionRuntime();
+    const calls: string[] = [];
+    const fetch = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push(url);
+      if (url.endsWith("desktopLoginStart")) {
+        const body = JSON.parse(String(init.body)) as { nonce: string };
+        return new Response(JSON.stringify({ serverNonce: body.nonce }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
+    });
+
+    await expect(
+      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
+        fetch,
+        openExternal: () => new Promise<void>(() => undefined),
+        timeoutMs: 25,
+      }),
+    ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
+    expect(calls).toEqual([
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
+      "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
+    ]);
+  });
+
+  it("bounds a hanging start request and still cancels the attempt", async () => {
+    const runtime = productionRuntime();
+    const calls: string[] = [];
+    const fetch = vi.fn((url: string) => {
+      calls.push(url);
+      if (url.endsWith("desktopLoginStart"))
+        return new Promise<Response>(() => undefined);
+      return Promise.resolve(
+        new Response(JSON.stringify({ cancelled: true }), { status: 200 }),
+      );
+    });
+
+    await expect(
+      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
+        fetch,
+        openExternal: async () => undefined,
+        timeoutMs: 25,
+      }),
+    ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
+    expect(calls).toEqual([
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
     ]);
