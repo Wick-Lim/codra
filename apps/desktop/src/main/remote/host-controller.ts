@@ -62,22 +62,29 @@ export class RemoteHostController {
   private async startInternal(): Promise<void> {
     const runtime = createRemoteFirebaseRuntime();
     try {
-      await bootstrapRemoteAccount(runtime);
       const identity = await loadOrCreateHostIdentity(
         this.options.userDataPath,
       );
-      const registered = await registerDevice(runtime.functions, {
-        action: identity.created ? "register" : "resume",
-        deviceId: identity.deviceId,
-        kind: "host",
-        displayName: "CODRA host",
-        publicKeyJwk: identity.publicKeyJwk,
-        keyThumbprint: identity.keyThumbprint,
-        capabilities: ["terminal", "webrtc", "turn-udp"],
-        remoteAccessEnabled: true,
-      });
-      await signInWithCustomToken(runtime.auth, registered.token);
-      const device = RemoteDeviceSchema.parse(registered.device);
+      const action = identity.created ? "register" : "resume";
+      const login = await bootstrapRemoteAccount(runtime, { identity, action });
+      let device;
+      if (login) {
+        await signInWithCustomToken(runtime.auth, login.token);
+        device = RemoteDeviceSchema.parse(login.device);
+      } else {
+        const registered = await registerDevice(runtime.functions, {
+          action,
+          deviceId: identity.deviceId,
+          kind: "host",
+          displayName: "CODRA host",
+          publicKeyJwk: identity.publicKeyJwk,
+          keyThumbprint: identity.keyThumbprint,
+          capabilities: ["terminal", "webrtc", "turn-udp"],
+          remoteAccessEnabled: true,
+        });
+        await signInWithCustomToken(runtime.auth, registered.token);
+        device = RemoteDeviceSchema.parse(registered.device);
+      }
       if (this.stopRequested) return;
       this.runtime = runtime;
       this.identity = identity;

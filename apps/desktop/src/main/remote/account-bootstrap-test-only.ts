@@ -1,14 +1,18 @@
-import { signInWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { signInWithEmailAndPassword } from "firebase/auth";
 import type { FirebaseRuntime } from "@codra/firebase";
+import type { DesktopLoginBootstrapOptions } from "./desktop-login";
 
 export const remoteAccountBootstrapBinding = "password-test-only-main" as const;
 
 export async function bootstrapRemoteAccount(
   runtime: FirebaseRuntime,
-): Promise<UserCredential> {
+  options: DesktopLoginBootstrapOptions,
+): Promise<undefined> {
+  void options;
   const email = process.env.CODRA_REMOTE_TEST_EMAIL;
   const password = process.env.CODRA_REMOTE_TEST_PASSWORD;
   if (!email || !password)
     throw new Error("REMOTE_TEST_EMAIL_AND_PASSWORD_REQUIRED");
-  return signInWithEmailAndPassword(runtime.auth, email, password);
+  await signInWithEmailAndPassword(runtime.auth, email, password);
+  return undefined;
 }
