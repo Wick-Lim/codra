@@ -1,0 +1,39 @@
+import { homedir } from "node:os";
+import * as nodePty from "node-pty";
+import type { CreateTerminalRequest } from "@codra/protocol";
+import type { PtyFactory, PtyHandle } from "./contracts";
+
+const MIN_COLS = 20;
+const MAX_COLS = 400;
+const MIN_ROWS = 5;
+const MAX_ROWS = 200;
+
+function bound(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, Math.trunc(value)));
+}
+
+export class NodePtyFactory implements PtyFactory {
+  spawn(request: CreateTerminalRequest): PtyHandle {
+    const pty = nodePty.spawn(process.env.SHELL || "/bin/zsh", ["-l"], {
+      cwd: request.cwd ?? homedir(),
+      cols: bound(request.cols, MIN_COLS, MAX_COLS),
+      rows: bound(request.rows, MIN_ROWS, MAX_ROWS),
+      env: { ...process.env, TERM: "xterm-256color" },
+    });
+
+    return {
+      pid: pty.pid,
+      write: (data) => pty.write(data),
+      resize: (cols, rows) => pty.resize(cols, rows),
+      kill: () => pty.kill(),
+      onData: (listener) => {
+        const disposable = pty.onData(listener);
+        return () => disposable.dispose();
+      },
+      onExit: (listener) => {
+        const disposable = pty.onExit(({ exitCode }) => listener(exitCode));
+        return () => disposable.dispose();
+      },
+    };
+  }
+}
