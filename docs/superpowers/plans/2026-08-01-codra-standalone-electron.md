@@ -816,16 +816,18 @@ git commit -m "feat: integrate terminal IPC and desktop lifecycle"
 **Files:**
 - Create: `playwright.config.ts`
 - Create: `tests/e2e/standalone-terminal.spec.ts`
+- Create: `tests/e2e/packaged-terminal.spec.ts`
 - Create: `apps/desktop/electron-builder.yml`
 - Create: `.github/workflows/ci.yml`
 - Create: `README.md`
+- Modify: `apps/desktop/src/main/index.ts`
 - Modify: `package.json`
 - Modify: `apps/desktop/package.json`
 - Modify: `.gitignore`
 
 **Interfaces:**
 - Consumes: the complete standalone Electron application from Tasks 1–6.
-- Produces: `pnpm test:e2e`, `pnpm package:mac`, a macOS CI gate, and the handoff point for the remote-access plan.
+- Produces: `pnpm test:e2e`, `pnpm test:packaged`, `pnpm package:mac`, a macOS CI gate, and the handoff point for the remote-access plan.
 
 - [ ] **Step 1: Write the failing Electron E2E test**
 
@@ -871,11 +873,13 @@ Expected: FAIL until root scripts, packaged entry resolution, and test data-dire
 
 - [ ] **Step 3: Implement deterministic E2E launch support**
 
-Add `CODRA_USER_DATA_DIR` handling in the composition root only when `app.isPackaged === false`; the test supplies a new temporary directory. Add `test:e2e` that builds and invokes Playwright. Ensure E2E teardown explicitly confirms Quit so no Electron or shell process remains.
+Add `CODRA_USER_DATA_DIR` handling in the composition root only when `app.isPackaged === false`; the test supplies a new temporary directory. A separate `CODRA_PACKAGED_SMOKE=1` opt-in may allow the packaged smoke test to supply its own temporary user-data directory without changing normal packaged behavior. Add `test:e2e` that builds and invokes Playwright. Ensure E2E teardown explicitly confirms Quit so no Electron or shell process remains.
 
 - [ ] **Step 4: Configure macOS packaging**
 
-`electron-builder.yml` uses `appId: com.codra.desktop`, `productName: CODRA`, category `public.app-category.developer-tools`, hardened runtime, and `mac` targets `dmg` and `zip` for `arm64` and `x64`. Add `postinstall: electron-builder install-app-deps` so `node-pty` and `better-sqlite3` are rebuilt for Electron. CI packages an unsigned directory artifact; release signing/notarization credentials remain outside this plan.
+`electron-builder.yml` uses `appId: com.codra.desktop`, `productName: CODRA`, category `public.app-category.developer-tools`, hardened runtime, and `mac` targets `dmg` and `zip` for `arm64` and `x64`. Explicitly ASAR-unpack both `node-pty` and `better-sqlite3` so the selected `spawn-helper` remains a directly executable file and native bindings remain loadable. Add `postinstall: electron-builder install-app-deps` so both modules are rebuilt for Electron. CI packages an unsigned directory artifact; release signing/notarization credentials remain outside this plan.
+
+After `package:dir`, `packaged-terminal.spec.ts` locates the generated `CODRA.app/Contents/MacOS/CODRA` executable, launches that binary with an isolated smoke-test data directory, creates a real shell, observes a marker that is not present in terminal echo, closes it, quits the packaged app, and verifies the PTY PID no longer exists. This test must fail if `spawn-helper` is still inside ASAR or loses executable permissions.
 
 - [ ] **Step 5: Add macOS CI**
 
@@ -890,13 +894,14 @@ pnpm test
 pnpm build
 pnpm test:e2e
 pnpm --filter @codra/desktop package:dir
+pnpm test:packaged
 ```
 
 Upload the unpacked application only after every check passes.
 
 - [ ] **Step 6: Document local development and lifecycle semantics**
 
-README must state: `pnpm dev` starts CODRA; local mode requires no account; closing the window keeps terminals running on macOS; Quit stops them after confirmation; Firebase/WebRTC is not yet part of this phase; `pnpm test:e2e` requires macOS.
+README must state: `pnpm dev` starts CODRA; local mode requires no account; closing the window keeps terminals running on macOS; Quit stops them after confirmation; Firebase/WebRTC is not yet part of this phase; `pnpm test:e2e` and `pnpm test:packaged` require macOS.
 
 - [ ] **Step 7: Run the full standalone verification gate**
 
@@ -905,7 +910,7 @@ Run the exact CI command sequence locally. Expected: zero lint errors, zero form
 - [ ] **Step 8: Commit the standalone release gate**
 
 ```bash
-git add package.json pnpm-lock.yaml playwright.config.ts tests .github apps/desktop/electron-builder.yml apps/desktop/package.json README.md .gitignore
+git add package.json pnpm-lock.yaml playwright.config.ts tests .github apps/desktop/electron-builder.yml apps/desktop/package.json apps/desktop/src/main/index.ts README.md .gitignore
 git commit -m "test: gate standalone Electron release"
 ```
 
