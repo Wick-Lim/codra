@@ -25,7 +25,10 @@ export class NodePtyFactory implements PtyFactory {
       pid: pty.pid,
       write: (data) => pty.write(data),
       resize: (cols, rows) => pty.resize(cols, rows),
-      kill: () => pty.kill(),
+      kill: (signal) => {
+        if (signal === undefined) pty.kill();
+        else pty.kill(signal);
+      },
       onData: (listener) => {
         const disposable = pty.onData(listener);
         return () => disposable.dispose();

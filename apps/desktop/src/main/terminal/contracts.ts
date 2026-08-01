@@ -8,7 +8,7 @@ export interface PtyHandle {
   readonly pid: number;
   write(data: string): void;
   resize(cols: number, rows: number): void;
-  kill(): void;
+  kill(signal?: string): void;
   onData(listener: (data: string) => void): () => void;
   onExit(listener: (exitCode: number) => void): () => void;
 }

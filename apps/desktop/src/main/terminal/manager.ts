@@ -20,11 +20,27 @@ const FINALIZATION_TIMEOUT_MS = 1_000;
 export type TerminalErrorReporter = (error: unknown) => void;
 
 export class TerminalError extends Error {
-  constructor(readonly code: "TERMINAL_NOT_FOUND") {
-    super(code);
+  constructor(
+    readonly code: "TERMINAL_NOT_FOUND" | "TERMINAL_TERMINATION_FAILED",
+    message: string = code,
+  ) {
+    super(message);
     this.name = "TerminalError";
   }
 }
+
+export class TerminalTerminationError extends TerminalError {
+  constructor(terminalId: string) {
+    super(
+      "TERMINAL_TERMINATION_FAILED",
+      `Terminal ${terminalId} did not exit after SIGKILL`,
+    );
+    this.name = "TerminalTerminationError";
+  }
+}
+
+type FinalizationCause =
+  { kind: "close"; exitCode: 0 } | { kind: "native"; exitCode: number };
 
 interface TerminalSession {
   descriptor: TerminalDescriptor;
@@ -39,12 +55,11 @@ interface TerminalSession {
   created: boolean;
   rolledBack: boolean;
   saveAttempted: boolean;
-  closeRequested: boolean;
-  terminationRequested: boolean;
   exitResolved: boolean;
   nativeExitCode?: number;
   exitPromise: Promise<number>;
   resolveExit: (exitCode: number) => void;
+  finalizationCause?: FinalizationCause;
   finalizationPromise?: Promise<void>;
 }
 
@@ -100,8 +115,6 @@ export class TerminalManager {
       created: false,
       rolledBack: false,
       saveAttempted: false,
-      closeRequested: false,
-      terminationRequested: false,
       exitResolved: false,
       ...exitSignal,
     };
@@ -121,7 +134,12 @@ export class TerminalManager {
         this.enqueueOutput(session, data);
       }
       this.publishChanged(descriptor);
-      if (session.exitResolved) this.startFinalization(session, false);
+      if (session.exitResolved) {
+        this.startFinalization(session, {
+          kind: "native",
+          exitCode: session.nativeExitCode ?? -1,
+        });
+      }
       return descriptor;
     } catch (error) {
       await this.rollbackCreation(session, error);
@@ -162,15 +180,22 @@ export class TerminalManager {
   }
 
   async close(terminalId: string): Promise<void> {
-    return this.startFinalization(this.getSession(terminalId), true);
+    return this.startFinalization(this.getSession(terminalId), {
+      kind: "close",
+      exitCode: 0,
+    });
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all(
+    const results = await Promise.allSettled(
       [...this.sessions.values()].map((session) =>
-        this.startFinalization(session, true),
+        this.startFinalization(session, { kind: "close", exitCode: 0 }),
       ),
     );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) throw failure.reason;
   }
 
   onOutput(listener: (chunk: TerminalOutputChunk) => void): () => void {
@@ -211,7 +236,9 @@ export class TerminalManager {
     session.exitResolved = true;
     session.nativeExitCode = exitCode;
     session.resolveExit(exitCode);
-    if (session.created) this.startFinalization(session, false);
+    if (session.created) {
+      this.startFinalization(session, { kind: "native", exitCode });
+    }
   }
 
   private enqueueOutput(session: TerminalSession, data: string): void {
@@ -244,11 +271,12 @@ export class TerminalManager {
 
   private startFinalization(
     session: TerminalSession,
-    requestTermination: boolean,
+    requestedCause: FinalizationCause,
   ): Promise<void> {
     session.acceptingInput = false;
-    if (requestTermination) session.closeRequested = true;
     if (session.finalizationPromise) return session.finalizationPromise;
+    session.finalizationCause ??= requestedCause;
+    const cause = session.finalizationCause;
 
     let resolveFinalization!: () => void;
     let rejectFinalization!: (error: unknown) => void;
@@ -258,26 +286,46 @@ export class TerminalManager {
     });
     session.finalizationPromise = finalizationPromise;
     finalizationPromise.catch((error: unknown) => this.report(error));
-    void this.runFinalization(session).then(
+    void this.runFinalization(session, cause).then(
       resolveFinalization,
-      rejectFinalization,
+      (error) => {
+        if (error instanceof TerminalTerminationError) {
+          session.finalizationPromise = undefined;
+        }
+        rejectFinalization(error);
+      },
     );
     return finalizationPromise;
   }
 
-  private async runFinalization(session: TerminalSession): Promise<void> {
+  private async runFinalization(
+    session: TerminalSession,
+    cause: FinalizationCause,
+  ): Promise<void> {
     let lifecycleError: unknown;
-    if (session.closeRequested && !session.terminationRequested) {
-      session.terminationRequested = true;
+    if (cause.kind === "close" && !session.exitResolved) {
       try {
         session.pty?.kill();
       } catch (error) {
         lifecycleError = error;
         this.report(error);
       }
+      if (!(await this.waitForNativeExit(session))) {
+        try {
+          session.pty?.kill("SIGKILL");
+        } catch (error) {
+          lifecycleError ??= error;
+          this.report(error);
+        }
+        if (!(await this.waitForNativeExit(session))) {
+          throw new TerminalTerminationError(session.descriptor.id);
+        }
+      }
     }
 
-    const nativeExitCode = await this.waitForNativeExit(session);
+    if (!session.exitResolved) {
+      throw new TerminalTerminationError(session.descriptor.id);
+    }
     const dataDisposalError = this.disposeListener(session.unsubscribeData);
     const exitDisposalError = this.disposeListener(session.unsubscribeExit);
     lifecycleError ??= dataDisposalError;
@@ -292,7 +340,7 @@ export class TerminalManager {
         const descriptor: TerminalDescriptor = {
           ...session.descriptor,
           state: "exited",
-          exitCode: session.closeRequested ? 0 : (nativeExitCode ?? -1),
+          exitCode: cause.exitCode,
         };
         await this.repository.update(descriptor);
         session.descriptor = descriptor;
@@ -309,16 +357,14 @@ export class TerminalManager {
     if (lifecycleError !== undefined) throw lifecycleError;
   }
 
-  private async waitForNativeExit(
-    session: TerminalSession,
-  ): Promise<number | undefined> {
-    if (session.exitResolved) return session.nativeExitCode;
+  private async waitForNativeExit(session: TerminalSession): Promise<boolean> {
+    if (session.exitResolved) return true;
     let timeout: number | NodeJS.Timeout | undefined;
     try {
       return await Promise.race([
-        session.exitPromise,
-        new Promise<undefined>((resolve) => {
-          timeout = setTimeout(resolve, FINALIZATION_TIMEOUT_MS);
+        session.exitPromise.then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), FINALIZATION_TIMEOUT_MS);
         }),
       ]);
     } finally {

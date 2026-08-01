@@ -30,7 +30,7 @@ class FakePty implements PtyHandle {
   readonly pid = 42;
   readonly writes: string[] = [];
   readonly sizes: Array<[number, number]> = [];
-  kills = 0;
+  readonly killSignals: Array<string | undefined> = [];
   exitOnKill = true;
   dataOnSubscribe?: string;
   exitOnSubscribe?: number;
@@ -51,9 +51,13 @@ class FakePty implements PtyHandle {
     this.sizes.push([cols, rows]);
   }
 
-  kill(): void {
-    this.kills += 1;
+  kill(signal?: string): void {
+    this.killSignals.push(signal);
     if (this.exitOnKill) this.emitExit(0);
+  }
+
+  get kills(): number {
+    return this.killSignals.length;
   }
 
   onData(listener: (data: string) => void): () => void {
@@ -525,7 +529,7 @@ describe("TerminalManager", () => {
     });
   });
 
-  it("uses a bounded fallback when a killed PTY never emits exit", async () => {
+  it("escalates to SIGKILL and waits for a delayed second-stage exit", async () => {
     vi.useFakeTimers();
     const pty = new FakePty();
     pty.exitOnKill = false;
@@ -533,9 +537,168 @@ describe("TerminalManager", () => {
     const terminal = await manager.create(request);
 
     const closing = manager.close(terminal.id);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(pty.killSignals).toEqual([undefined, "SIGKILL"]);
+    await vi.advanceTimersByTimeAsync(500);
+    pty.emitExit(137);
 
     await expect(closing).resolves.toBeUndefined();
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      exitCode: 0,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects a double timeout without publishing a false exit", async () => {
+    vi.useFakeTimers();
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, repository, changed, reporter } = createHarness({ pty });
+    const terminal = await manager.create(request);
+
+    const result = manager.close(terminal.id).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const error = await result;
+
+    expect(error).toMatchObject({
+      code: "TERMINAL_TERMINATION_FAILED",
+      message: expect.stringContaining(terminal.id),
+    });
+    expect(pty.killSignals).toEqual([undefined, "SIGKILL"]);
+    expect(pty.subscriptions).toEqual({ data: 1, exit: 1 });
+    expect(repository.descriptors.get(terminal.id)?.state).toBe("running");
+    expect(changed).toEqual([terminal]);
+    expect(reporter).toHaveBeenCalledWith(error);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("recovers a retained double-timeout session when exit arrives late", async () => {
+    vi.useFakeTimers();
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, repository, outputStore } = createHarness({ pty });
+    const terminal = await manager.create(request);
+    const failedClose = manager
+      .close(terminal.id)
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await failedClose;
+
+    pty.emitData("late output");
+    await outputStore.whenAppended();
+    pty.emitExit(137);
+    await manager.close(terminal.id);
+
+    expect(pty.killSignals).toEqual([undefined, "SIGKILL"]);
+    expect(outputStore.chunks).toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "late output" },
+    ]);
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      exitCode: 0,
+    });
+    expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("makes closeAll reject when a terminal cannot be confirmed exited", async () => {
+    vi.useFakeTimers();
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, repository } = createHarness({ pty });
+    const terminal = await manager.create(request);
+
+    const result = manager.closeAll().catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const error = await result;
+
+    expect(error).toMatchObject({ code: "TERMINAL_TERMINATION_FAILED" });
+    expect(repository.descriptors.get(terminal.id)?.state).toBe("running");
+    expect(pty.subscriptions).toEqual({ data: 1, exit: 1 });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for every closeAll finalizer before rejecting", async () => {
+    vi.useFakeTimers();
+    const stubbornPty = new FakePty();
+    stubbornPty.exitOnKill = false;
+    const exitingPty = new FakePty();
+    const repository = new MemoryRepository();
+    const outputStore = new MemoryOutputStore();
+    const handles = [stubbornPty, exitingPty];
+    const factory: PtyFactory = {
+      spawn: () => {
+        const handle = handles.shift();
+        if (!handle) throw new Error("No fake PTY available");
+        return handle;
+      },
+    };
+    const manager = new TerminalManager(
+      factory,
+      repository,
+      outputStore,
+      vi.fn(),
+    );
+    await manager.create(request);
+    await manager.create(request);
+    const updateGate = repository.delayNextUpdate();
+    let settled = false;
+
+    const result = manager.closeAll().then(
+      () => {
+        settled = true;
+        return undefined;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await updateGate.started;
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(settled).toBe(false);
+    updateGate.release();
+    const error = await result;
+    expect(error).toMatchObject({ code: "TERMINAL_TERMINATION_FAILED" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("preserves a native exit cause when close joins its finalizer", async () => {
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const outputStore = new MemoryOutputStore();
+    const gate = outputStore.delayAppends();
+    const { manager, repository } = createHarness({ pty, outputStore });
+    const terminal = await manager.create(request);
+    pty.emitData("tail");
+    await outputStore.whenAppendAttempted();
+
+    pty.emitExit(143);
+    const closing = manager.close(terminal.id);
+    gate.release();
+    await closing;
+
+    expect(pty.killSignals).toEqual([]);
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      exitCode: 143,
+    });
+  });
+
+  it("keeps the explicit-close exit code when close precedes native exit", async () => {
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, repository } = createHarness({ pty });
+    const terminal = await manager.create(request);
+
+    const closing = manager.close(terminal.id);
+    pty.emitExit(143);
+    await closing;
+
+    expect(pty.killSignals).toEqual([undefined]);
     expect(repository.descriptors.get(terminal.id)).toMatchObject({
       state: "exited",
       exitCode: 0,

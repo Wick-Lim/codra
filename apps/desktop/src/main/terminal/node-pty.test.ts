@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
+import * as nodePty from "node-pty";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NodePtyFactory } from "./node-pty";
 
@@ -32,7 +33,34 @@ function isProcessAlive(pid: number): boolean {
 
 describe("NodePtyFactory", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
+  });
+
+  it("forwards explicit kill signals and preserves zero-argument kills", () => {
+    const kill = vi.fn();
+    vi.spyOn(nodePty, "spawn").mockReturnValue({
+      pid: 42,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill,
+      onData: vi.fn(() => ({ dispose: vi.fn() })),
+      onExit: vi.fn(() => ({ dispose: vi.fn() })),
+    } as unknown as nodePty.IPty);
+    const pty = new NodePtyFactory().spawn({
+      cwd: homedir(),
+      cols: 80,
+      rows: 24,
+    });
+
+    pty.kill("SIGKILL");
+
+    expect(kill).toHaveBeenCalledWith("SIGKILL");
+    kill.mockClear();
+
+    pty.kill();
+
+    expect(kill).toHaveBeenCalledWith();
   });
 
   it("runs zsh and reaps its child after observing real command output", async () => {
