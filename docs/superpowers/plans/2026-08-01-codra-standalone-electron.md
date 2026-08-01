@@ -252,6 +252,7 @@ git commit -m "feat: bootstrap secure Electron desktop shell"
 - Create: `apps/desktop/src/preload/desktop-api.ts`
 - Create: `apps/desktop/src/preload/global.d.ts`
 - Modify: `apps/desktop/package.json`
+- Modify: `pnpm-lock.yaml`
 
 **Interfaces:**
 - Consumes: Electron IPC from Task 1.
@@ -438,7 +439,16 @@ pnpm --filter @codra/desktop typecheck
 
 Expected: all commands exit 0.
 
-- [ ] **Step 8: Commit the frozen contracts**
+- [ ] **Step 8: Pin dependencies shared by the parallel implementation wave**
+
+Install the native/runtime dependencies needed by Tasks 3–5 before those tasks branch into parallel work, so their file sets remain disjoint:
+
+```bash
+pnpm --filter @codra/desktop add node-pty@1.1.0 better-sqlite3@13.0.2 @xterm/xterm@6.0.0 @xterm/addon-fit@0.11.0
+pnpm --filter @codra/desktop add -D @types/better-sqlite3@7.6.13
+```
+
+- [ ] **Step 9: Commit the frozen contracts and shared dependency pins**
 
 ```bash
 git add packages/protocol apps/desktop/src/main/terminal/contracts.ts apps/desktop/src/preload apps/desktop/package.json pnpm-lock.yaml
@@ -454,7 +464,6 @@ git commit -m "feat: define desktop terminal contracts"
 - Create: `apps/desktop/src/main/terminal/manager.ts`
 - Create: `apps/desktop/src/main/terminal/node-pty.test.ts`
 - Create: `apps/desktop/src/main/terminal/node-pty.ts`
-- Modify: `apps/desktop/package.json`
 
 **Interfaces:**
 - Consumes: `PtyFactory`, `TerminalRepository`, and `TerminalOutputStore` from Task 2.
@@ -519,7 +528,7 @@ Publish `onChanged` after creation, resize, process exit, and explicit close. Ex
 
 - [ ] **Step 4: Implement and test `NodePtyFactory`**
 
-Run `pnpm --filter @codra/desktop add node-pty@1.1.0`. Use the user's `SHELL`, falling back to `/bin/zsh`; pass `TERM=xterm-256color`, the bounded columns/rows, and a copied environment. The adapter returns unsubscribe closures for data and exit listeners. Its integration test spawns `/bin/zsh -l`, writes `printf '__CODRA_PTY__\\n'`, observes the marker, and kills the PTY in `finally`.
+Use the `node-pty@1.1.0` dependency pinned by Task 2. Use the user's `SHELL`, falling back to `/bin/zsh`; pass `TERM=xterm-256color`, the bounded columns/rows, and a copied environment. The adapter returns unsubscribe closures for data and exit listeners. Its integration test spawns `/bin/zsh -l`, writes `printf '__CODRA_PTY__\\n'`, observes the marker, and kills the PTY in `finally`.
 
 - [ ] **Step 5: Verify PTY manager tests**
 
@@ -535,7 +544,7 @@ Expected: all tests pass and the real PTY test exits without a child process lea
 - [ ] **Step 6: Commit the PTY manager**
 
 ```bash
-git add apps/desktop/src/main/terminal apps/desktop/package.json pnpm-lock.yaml
+git add apps/desktop/src/main/terminal
 git commit -m "feat: add Electron PTY manager"
 ```
 
@@ -548,7 +557,6 @@ git commit -m "feat: add Electron PTY manager"
 - Create: `apps/desktop/src/main/terminal/sqlite.ts`
 - Create: `apps/desktop/src/main/terminal/scrollback.test.ts`
 - Create: `apps/desktop/src/main/terminal/scrollback.ts`
-- Modify: `apps/desktop/package.json`
 
 **Interfaces:**
 - Consumes: `TerminalRepository` and `TerminalOutputStore` from Task 2.
@@ -584,7 +592,7 @@ Expected: FAIL because `SqliteTerminalRepository` does not exist.
 
 - [ ] **Step 3: Implement the SQLite repository**
 
-Run `pnpm --filter @codra/desktop add better-sqlite3@13.0.2` and `pnpm --filter @codra/desktop add -D @types/better-sqlite3@7.6.13`. Create table `terminals(id TEXT PRIMARY KEY, title TEXT, cwd TEXT, cols INTEGER, rows INTEGER, state TEXT, created_at TEXT, exit_code INTEGER)`, enable `journal_mode = WAL`, and map rows explicitly to `TerminalDescriptor`. Use prepared insert/update/list and `UPDATE terminals SET state = 'exited', exit_code = ? WHERE state = 'running'` statements. The constructor accepts a DB path and creates its parent directory.
+Use the `better-sqlite3@13.0.2` and `@types/better-sqlite3@7.6.13` dependencies pinned by Task 2. Create table `terminals(id TEXT PRIMARY KEY, title TEXT, cwd TEXT, cols INTEGER, rows INTEGER, state TEXT, created_at TEXT, exit_code INTEGER)`, enable `journal_mode = WAL`, and map rows explicitly to `TerminalDescriptor`. Use prepared insert/update/list and `UPDATE terminals SET state = 'exited', exit_code = ? WHERE state = 'running'` statements. The constructor accepts a DB path and creates its parent directory.
 
 - [ ] **Step 4: Write failing scrollback replay and bound tests**
 
@@ -626,7 +634,7 @@ Expected: all tests pass; every test uses a fresh `mkdtemp` directory and remove
 - [ ] **Step 7: Commit persistence**
 
 ```bash
-git add apps/desktop/src/main/terminal apps/desktop/package.json pnpm-lock.yaml
+git add apps/desktop/src/main/terminal
 git commit -m "feat: persist terminal metadata and scrollback"
 ```
 
@@ -642,7 +650,6 @@ git commit -m "feat: persist terminal metadata and scrollback"
 - Create: `apps/desktop/src/renderer/src/terminal/TerminalPane.tsx`
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Modify: `apps/desktop/src/renderer/src/styles.css`
-- Modify: `apps/desktop/package.json`
 
 **Interfaces:**
 - Consumes: `window.codra: CodraDesktopApi` from Task 2.
@@ -683,7 +690,7 @@ Expected: FAIL because the hook and components do not exist.
 
 - [ ] **Step 5: Implement xterm.js pane**
 
-Run `pnpm --filter @codra/desktop add @xterm/xterm@6.0.0 @xterm/addon-fit@0.11.0`. `TerminalPane` creates one `Terminal` and `FitAddon` per active terminal, imports `@xterm/xterm/css/xterm.css`, replays from sequence 0 on first attach, calls `terminal.write(chunk.data)`, forwards `onData` to `window.codra.terminal.write`, and forwards debounced fit dimensions to `resize`. Dispose terminal, addon, resize observer, and listeners on terminal change or unmount.
+Use the `@xterm/xterm@6.0.0` and `@xterm/addon-fit@0.11.0` dependencies pinned by Task 2. `TerminalPane` creates one `Terminal` and `FitAddon` per active terminal, imports `@xterm/xterm/css/xterm.css`, replays from sequence 0 on first attach, calls `terminal.write(chunk.data)`, forwards `onData` to `window.codra.terminal.write`, and forwards debounced fit dimensions to `resize`. Dispose terminal, addon, resize observer, and listeners on terminal change or unmount.
 
 - [ ] **Step 6: Implement the desktop visual shell**
 
@@ -704,7 +711,7 @@ Expected: all commands exit 0; renderer bundle contains no Node built-ins.
 - [ ] **Step 8: Commit the renderer**
 
 ```bash
-git add apps/desktop/src/renderer apps/desktop/package.json pnpm-lock.yaml
+git add apps/desktop/src/renderer
 git commit -m "feat: add local terminal workspace UI"
 ```
 
