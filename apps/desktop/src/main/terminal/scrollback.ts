@@ -18,6 +18,7 @@ interface StoredChunk {
 }
 
 const defaultByteLimit = 10 * 1024 * 1024;
+const compactionLowWatermarkRatio = 0.75;
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
@@ -185,10 +186,13 @@ export class FileTerminalOutputStore implements TerminalOutputStore {
     const newest = await this.readRecords(terminalId);
     const retained: string[] = [];
     let size = 0;
+    const lowWatermark = Math.floor(
+      this.byteLimit * compactionLowWatermarkRatio,
+    );
     for (let index = newest.length - 1; index >= 0; index -= 1) {
       const encoded = encodeRecord(newest[index]);
       const encodedSize = Buffer.byteLength(encoded, "utf8");
-      if (size + encodedSize > this.byteLimit) {
+      if (retained.length > 0 && size + encodedSize > lowWatermark) {
         break;
       }
       retained.unshift(encoded);

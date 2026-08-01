@@ -171,7 +171,12 @@ export class TerminalManager {
   }
 
   async replay(request: ReplayTerminalRequest): Promise<TerminalOutputChunk[]> {
-    this.getSession(request.terminalId);
+    if (
+      !this.sessions.has(request.terminalId) &&
+      (await this.repository.find(request.terminalId)) === undefined
+    ) {
+      throw new TerminalError("TERMINAL_NOT_FOUND");
+    }
     return this.outputStore.readAfter(
       request.terminalId,
       request.afterSequence,

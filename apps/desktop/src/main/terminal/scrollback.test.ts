@@ -129,6 +129,47 @@ describe("FileTerminalOutputStore", () => {
     ).toBe(true);
   });
 
+  it("leaves headroom after compaction so following appends do not rewrite the file", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 256);
+    for (let sequence = 1; sequence <= 8; sequence += 1) {
+      await store.append(
+        terminalId,
+        `chunk-${sequence.toString().padStart(2, "0")}`,
+      );
+    }
+
+    const path = store.pathFor(terminalId);
+    const inodeAfterCompaction = (await stat(path)).ino;
+    await store.append(terminalId, "chunk-09");
+    expect((await stat(path)).ino).toBe(inodeAfterCompaction);
+    await store.append(terminalId, "chunk-10");
+    expect((await stat(path)).ino).toBe(inodeAfterCompaction);
+
+    const records = await store.readAfter(terminalId, 0, 100);
+    expect((await stat(path)).size).toBeLessThanOrEqual(256);
+    expect(records.at(-1)).toEqual({
+      terminalId,
+      sequence: 10,
+      data: "chunk-10",
+    });
+  });
+
+  it("retains the newest capped record when it is larger than the low watermark", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 128);
+    await store.append(terminalId, "old");
+    await store.append(terminalId, "old");
+    const latest = "x".repeat(75);
+
+    await store.append(terminalId, latest);
+
+    const path = store.pathFor(terminalId);
+    expect((await stat(path)).size).toBeGreaterThan(96);
+    expect((await stat(path)).size).toBeLessThanOrEqual(128);
+    await expect(store.readAfter(terminalId, 0, 100)).resolves.toEqual([
+      { terminalId, sequence: 3, data: latest },
+    ]);
+  });
+
   it("rejects an oversized multibyte record without consuming its sequence", async () => {
     const root = await rootDirectory();
     const store = new FileTerminalOutputStore(root, 64);

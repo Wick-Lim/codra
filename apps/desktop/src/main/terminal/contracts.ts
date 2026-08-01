@@ -21,6 +21,7 @@ export interface TerminalRepository {
   save(descriptor: TerminalDescriptor): Promise<void>;
   update(descriptor: TerminalDescriptor): Promise<void>;
   list(): Promise<TerminalDescriptor[]>;
+  find(terminalId: string): Promise<TerminalDescriptor | undefined>;
   markRunningExited(exitCode: number): Promise<void>;
 }
 

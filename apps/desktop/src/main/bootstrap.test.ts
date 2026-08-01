@@ -37,6 +37,7 @@ function repositoryFake(
     save: vi.fn(async () => undefined),
     update: vi.fn(async () => undefined),
     list: vi.fn(async () => []),
+    find: vi.fn(async () => undefined),
     markRunningExited: vi.fn(markRunningExited),
     close: vi.fn(),
   };

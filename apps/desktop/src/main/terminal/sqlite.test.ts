@@ -69,6 +69,16 @@ describe("SqliteTerminalRepository", () => {
     ]);
   });
 
+  it("finds one persisted descriptor by terminal ID", async () => {
+    const repository = openRepository(await databasePath());
+    await repository.save(descriptor);
+
+    await expect(repository.find(descriptor.id)).resolves.toEqual(descriptor);
+    await expect(
+      repository.find("94ac89ca-1950-4d23-8630-131398971b25"),
+    ).resolves.toBeUndefined();
+  });
+
   it("marks stale running descriptors exited after an abnormal restart", async () => {
     const repository = openRepository(await databasePath());
     await repository.save(descriptor);

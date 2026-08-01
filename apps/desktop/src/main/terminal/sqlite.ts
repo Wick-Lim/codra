@@ -37,6 +37,7 @@ export class SqliteTerminalRepository implements TerminalRepository {
   private readonly insert: Database.Statement;
   private readonly updateStatement: Database.Statement;
   private readonly listStatement: Database.Statement;
+  private readonly findStatement: Database.Statement;
   private readonly markRunningExitedStatement: Database.Statement;
   private closed = false;
 
@@ -76,6 +77,11 @@ export class SqliteTerminalRepository implements TerminalRepository {
       FROM terminals
       ORDER BY created_at ASC, id ASC
     `);
+    this.findStatement = this.database.prepare(`
+      SELECT ${terminalColumns}
+      FROM terminals
+      WHERE id = ?
+    `);
     this.markRunningExitedStatement = this.database.prepare(`
       UPDATE terminals
       SET state = 'exited', exit_code = ?
@@ -93,6 +99,11 @@ export class SqliteTerminalRepository implements TerminalRepository {
 
   async list(): Promise<TerminalDescriptor[]> {
     return (this.listStatement.all() as TerminalRow[]).map(toDescriptor);
+  }
+
+  async find(terminalId: string): Promise<TerminalDescriptor | undefined> {
+    const row = this.findStatement.get(terminalId) as TerminalRow | undefined;
+    return row === undefined ? undefined : toDescriptor(row);
   }
 
   async markRunningExited(exitCode: number): Promise<void> {

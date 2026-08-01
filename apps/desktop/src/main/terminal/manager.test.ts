@@ -132,6 +132,10 @@ class MemoryRepository implements TerminalRepository {
     return [...this.descriptors.values()];
   }
 
+  async find(terminalId: string): Promise<TerminalDescriptor | undefined> {
+    return this.descriptors.get(terminalId);
+  }
+
   async markRunningExited(): Promise<void> {}
 
   delayNextUpdate(): { started: Promise<void>; release(): void } {
@@ -436,6 +440,11 @@ describe("TerminalManager", () => {
     await expect(manager.close(terminalId)).rejects.toMatchObject({
       code: "TERMINAL_NOT_FOUND",
     } satisfies Partial<TerminalError>);
+    await expect(
+      manager.replay({ terminalId, afterSequence: 0, limit: 20 }),
+    ).rejects.toMatchObject({
+      code: "TERMINAL_NOT_FOUND",
+    } satisfies Partial<TerminalError>);
   });
 
   it("replays persisted scrollback without a running PTY", async () => {
@@ -457,6 +466,27 @@ describe("TerminalManager", () => {
       manager.replay({ terminalId: terminal.id, afterSequence: 0, limit: 20 }),
     ).resolves.toEqual([
       { terminalId: terminal.id, sequence: 1, data: "first" },
+    ]);
+  });
+
+  it("replays persisted exited scrollback after the manager restarts", async () => {
+    const repository = new MemoryRepository();
+    const outputStore = new MemoryOutputStore();
+    const first = createHarness({ repository, outputStore });
+    const terminal = await first.manager.create(request);
+    first.pty.emitData("persisted");
+    await outputStore.whenAppended();
+    await first.manager.close(terminal.id);
+    const restarted = createHarness({ repository, outputStore }).manager;
+
+    await expect(
+      restarted.replay({
+        terminalId: terminal.id,
+        afterSequence: 0,
+        limit: 20,
+      }),
+    ).resolves.toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "persisted" },
     ]);
   });
 
