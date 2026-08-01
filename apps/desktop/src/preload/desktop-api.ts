@@ -1,0 +1,87 @@
+import {
+  CreateTerminalRequestSchema,
+  IPC_CHANNELS,
+  ReplayTerminalRequestSchema,
+  ResizeTerminalRequestSchema,
+  TerminalDescriptorSchema,
+  TerminalIdSchema,
+  TerminalOutputChunkSchema,
+  WriteTerminalRequestSchema,
+  type CodraDesktopApi,
+} from "@codra/protocol";
+
+type IpcListener = (event: unknown, payload: unknown) => void;
+
+export interface IpcRendererLike {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  on(channel: string, listener: IpcListener): void;
+  removeListener(channel: string, listener: IpcListener): void;
+}
+
+export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
+  return {
+    terminal: {
+      async list() {
+        return TerminalDescriptorSchema.array().parse(
+          await ipc.invoke(IPC_CHANNELS.terminalList),
+        );
+      },
+      async create(request) {
+        return TerminalDescriptorSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalCreate,
+            CreateTerminalRequestSchema.parse(request),
+          ),
+        );
+      },
+      async write(request) {
+        await ipc.invoke(
+          IPC_CHANNELS.terminalWrite,
+          WriteTerminalRequestSchema.parse(request),
+        );
+      },
+      async resize(request) {
+        await ipc.invoke(
+          IPC_CHANNELS.terminalResize,
+          ResizeTerminalRequestSchema.parse(request),
+        );
+      },
+      async replay(request) {
+        return TerminalOutputChunkSchema.array().parse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalReplay,
+            ReplayTerminalRequestSchema.parse(request),
+          ),
+        );
+      },
+      async close(terminalId) {
+        await ipc.invoke(
+          IPC_CHANNELS.terminalClose,
+          TerminalIdSchema.parse(terminalId),
+        );
+      },
+      onOutput(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = TerminalOutputChunkSchema.safeParse(payload);
+          if (parsed.success) {
+            listener(parsed.data);
+          }
+        };
+
+        ipc.on(IPC_CHANNELS.terminalOutput, wrapped);
+        return () => ipc.removeListener(IPC_CHANNELS.terminalOutput, wrapped);
+      },
+      onChanged(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = TerminalDescriptorSchema.safeParse(payload);
+          if (parsed.success) {
+            listener(parsed.data);
+          }
+        };
+
+        ipc.on(IPC_CHANNELS.terminalChanged, wrapped);
+        return () => ipc.removeListener(IPC_CHANNELS.terminalChanged, wrapped);
+      },
+    },
+  };
+}
