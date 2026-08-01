@@ -11,8 +11,8 @@ import {
 } from "@codra/protocol";
 import {
   bootstrapProductionDesktopLogin,
-  createDesktopLoginBridgeUrl,
   createDesktopLoginCallbackListener,
+  createDesktopLoginGoogleAuthUriRequest,
   desktopLoginFunctionUrl,
   parseDesktopLoginCallback,
 } from "./desktop-login";
@@ -81,7 +81,8 @@ function productionRuntime(): FirebaseRuntime {
         "https://codra-1b3bb.firebaseapp.com",
       ],
       desktopAuthBridgeUrl: "https://codra-1b3bb.firebaseapp.com/desktop-auth",
-      firebaseAuthHandlerUrl: "https://codra-1b3bb.firebaseapp.com/__/auth/handler",
+      firebaseAuthHandlerUrl:
+        "https://codra-1b3bb.firebaseapp.com/__/auth/handler",
       authAppCheckEnforcement: false,
       functionsRegion: "asia-northeast3",
     },
@@ -96,14 +97,29 @@ describe("desktop login loopback", () => {
     expect(createPkceChallenge(verifier)).toHaveLength(43);
   });
 
-  it("creates only the canonical hosted bridge URL", () => {
-    expect(createDesktopLoginBridgeUrl(attemptId, state)).toBe(
-      `https://codra-1b3bb.firebaseapp.com/desktop-auth?attempt=${attemptId}&state=${state}`,
-    );
+  it("creates a direct Firebase Google auth URI request for the loopback callback", () => {
+    expect(
+      createDesktopLoginGoogleAuthUriRequest(
+        productionRuntime(),
+        `http://127.0.0.1:43123/auth/callback?attempt=${attemptId}`,
+        state,
+      ),
+    ).toEqual({
+      url: "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=key",
+      body: {
+        providerId: "google.com",
+        continueUri: `http://127.0.0.1:43123/auth/callback?attempt=${attemptId}`,
+        authFlowType: "CODE_FLOW",
+        sessionId: state,
+        context: state,
+      },
+    });
   });
 
   it("constructs fixed production and deployment-derived emulator Function URLs", () => {
-    expect(desktopLoginFunctionUrl(productionRuntime(), "desktopLoginStart")).toBe(
+    expect(
+      desktopLoginFunctionUrl(productionRuntime(), "desktopLoginStart"),
+    ).toBe(
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
     );
     expect(
@@ -118,7 +134,9 @@ describe("desktop login loopback", () => {
         } as FirebaseRuntime,
         "desktopLoginRedeem",
       ),
-    ).toBe("http://127.0.0.1:5001/demo-codra/asia-northeast3/desktopLoginRedeem");
+    ).toBe(
+      "http://127.0.0.1:5001/demo-codra/asia-northeast3/desktopLoginRedeem",
+    );
   });
 
   it("accepts only the exact method, host, path, and three callback keys", () => {
@@ -140,35 +158,71 @@ describe("desktop login loopback", () => {
         expected,
       ),
     ).toBeUndefined();
-    expect(parseDesktopLoginCallback({ ...valid, method: "POST" }, expected)).toBeUndefined();
     expect(
-      parseDesktopLoginCallback({ ...valid, url: valid.url.replace("callback", "other") }, expected),
+      parseDesktopLoginCallback({ ...valid, method: "POST" }, expected),
     ).toBeUndefined();
     expect(
-      parseDesktopLoginCallback({ ...valid, url: `${valid.url}&extra=1` }, expected),
+      parseDesktopLoginCallback(
+        { ...valid, url: valid.url.replace("callback", "other") },
+        expected,
+      ),
     ).toBeUndefined();
     expect(
-      parseDesktopLoginCallback({ ...valid, url: valid.url.replace(state, code) }, expected),
+      parseDesktopLoginCallback(
+        { ...valid, url: `${valid.url}&extra=1` },
+        expected,
+      ),
     ).toBeUndefined();
     expect(
-      parseDesktopLoginCallback({ ...valid, url: `/auth/callback?attempt=${attemptId}&attempt=${attemptId}&code=${code}&state=${state}` }, expected),
+      parseDesktopLoginCallback(
+        { ...valid, url: valid.url.replace(state, code) },
+        expected,
+      ),
     ).toBeUndefined();
     expect(
-      parseDesktopLoginCallback({ ...valid, url: `/auth/callback?attempt=${attemptId}&code=${code}&state=${state}${"x".repeat(4_096)}` }, expected),
+      parseDesktopLoginCallback(
+        {
+          ...valid,
+          url: `/auth/callback?attempt=${attemptId}&attempt=${attemptId}&code=${code}&state=${state}`,
+        },
+        expected,
+      ),
+    ).toBeUndefined();
+    expect(
+      parseDesktopLoginCallback(
+        {
+          ...valid,
+          url: `/auth/callback?attempt=${attemptId}&code=${code}&state=${state}${"x".repeat(4_096)}`,
+        },
+        expected,
+      ),
     ).toBeUndefined();
   });
 
   it("keeps invalid traffic from consuming the attempt and accepts the first valid callback", async () => {
-    const listener = await createDesktopLoginCallbackListener({ attemptId, state });
+    const listener = await createDesktopLoginCallbackListener({
+      attemptId,
+      state,
+    });
     const invalid = await request(
-      callbackTarget(listener.port, `?attempt=${attemptId}&code=${code}&state=${state}&extra=1`),
+      callbackTarget(
+        listener.port,
+        `?attempt=${attemptId}&code=${code}&state=${state}&extra=1`,
+      ),
     );
     expect(invalid).toBe(400);
 
     const valid = request(
-      callbackTarget(listener.port, `?attempt=${attemptId}&code=${code}&state=${state}`),
+      callbackTarget(
+        listener.port,
+        `?attempt=${attemptId}&code=${code}&state=${state}`,
+      ),
     );
-    await expect(listener.waitForCallback()).resolves.toEqual({ attemptId, code, state });
+    await expect(listener.waitForCallback()).resolves.toEqual({
+      attemptId,
+      code,
+      state,
+    });
     expect(await valid).toBe(200);
     await listener.close();
   });
@@ -181,19 +235,34 @@ describe("desktop login loopback", () => {
       const body = JSON.parse(String(init.body));
       calls.push({ url, body });
       if (url.endsWith("desktopLoginStart"))
-        return new Response(JSON.stringify({ serverNonce: body.nonce }), { status: 200 });
+        return new Response(JSON.stringify({ serverNonce: body.nonce }), {
+          status: 200,
+        });
+      if (url.includes("/v1/accounts:createAuthUri"))
+        return new Response(
+          JSON.stringify({
+            authUri: "https://accounts.google.com/o/oauth2/auth",
+            sessionId: body.sessionId,
+          }),
+          { status: 200 },
+        );
       return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
     });
 
     await expect(
-      bootstrapProductionDesktopLogin(runtime, { identity, action: "register" }, {
-        fetch,
-        openExternal: async () => undefined,
-        timeoutMs: 25,
-      }),
+      bootstrapProductionDesktopLogin(
+        runtime,
+        { identity, action: "register" },
+        {
+          fetch,
+          openExternal: async () => undefined,
+          timeoutMs: 25,
+        },
+      ),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
     expect(calls.map((call) => call.url)).toEqual([
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
+      "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=key",
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
     ]);
   });
@@ -204,16 +273,22 @@ describe("desktop login loopback", () => {
     const fetch = vi.fn(async (url: string) => {
       calls.push(url);
       if (url.endsWith("desktopLoginStart"))
-        return new Response(JSON.stringify({ serverNonce: "wrong" }), { status: 200 });
+        return new Response(JSON.stringify({ serverNonce: "wrong" }), {
+          status: 200,
+        });
       return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
     });
 
     await expect(
-      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
-        fetch,
-        openExternal: async () => undefined,
-        timeoutMs: 500,
-      }),
+      bootstrapProductionDesktopLogin(
+        runtime,
+        { identity: hostIdentity(), action: "register" },
+        {
+          fetch,
+          openExternal: async () => undefined,
+          timeoutMs: 500,
+        },
+      ),
     ).rejects.toThrow("DESKTOP_LOGIN_START_INVALID");
     expect(calls).toEqual([
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
@@ -228,20 +303,37 @@ describe("desktop login loopback", () => {
       calls.push(url);
       if (url.endsWith("desktopLoginStart")) {
         const body = JSON.parse(String(init.body)) as { nonce: string };
-        return new Response(JSON.stringify({ serverNonce: body.nonce }), { status: 200 });
+        return new Response(JSON.stringify({ serverNonce: body.nonce }), {
+          status: 200,
+        });
+      }
+      if (url.includes("/v1/accounts:createAuthUri")) {
+        const body = JSON.parse(String(init.body)) as { sessionId: string };
+        return new Response(
+          JSON.stringify({
+            authUri: "https://accounts.google.com/o/oauth2/auth",
+            sessionId: body.sessionId,
+          }),
+          { status: 200 },
+        );
       }
       return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
     });
 
     await expect(
-      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
-        fetch,
-        openExternal: () => new Promise<void>(() => undefined),
-        timeoutMs: 25,
-      }),
+      bootstrapProductionDesktopLogin(
+        runtime,
+        { identity: hostIdentity(), action: "register" },
+        {
+          fetch,
+          openExternal: () => new Promise<void>(() => undefined),
+          timeoutMs: 25,
+        },
+      ),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
     expect(calls).toEqual([
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
+      "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=key",
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
     ]);
   });
@@ -259,11 +351,15 @@ describe("desktop login loopback", () => {
     });
 
     await expect(
-      bootstrapProductionDesktopLogin(runtime, { identity: hostIdentity(), action: "register" }, {
-        fetch,
-        openExternal: async () => undefined,
-        timeoutMs: 25,
-      }),
+      bootstrapProductionDesktopLogin(
+        runtime,
+        { identity: hostIdentity(), action: "register" },
+        {
+          fetch,
+          openExternal: async () => undefined,
+          timeoutMs: 25,
+        },
+      ),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
     expect(calls).toEqual([
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
@@ -271,8 +367,13 @@ describe("desktop login loopback", () => {
     ]);
   });
 
-  it("has no embedded BrowserWindow, webview, or OAuth implementation", async () => {
-    const source = await readFile(new URL("./desktop-login.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/BrowserWindow|BrowserView|webview|GoogleAuthProvider|signInWithPopup|signInWithRedirect/u);
+  it("has no embedded browser or Firebase web redirect implementation", async () => {
+    const source = await readFile(
+      new URL("./desktop-login.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).not.toMatch(
+      /BrowserWindow|BrowserView|webview|signInWithPopup|signInWithRedirect/u,
+    );
   });
 });

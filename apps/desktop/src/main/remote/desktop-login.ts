@@ -1,12 +1,19 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { Socket } from "node:net";
 import type { FirebaseRuntime } from "@codra/firebase";
+import { GoogleAuthProvider, signInWithCredential } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 import {
   CODRA_PROJECT_ID,
+  DesktopLoginAllowResponseSchema,
   FUNCTION_REGION,
   DesktopLoginRedeemResponseSchema,
-  PkceVerifierSchema,
   buildDesktopLoginRedeemSigningPayload,
   buildDesktopLoginStartSigningPayload,
   createPkceChallenge,
@@ -20,7 +27,7 @@ import {
 import type { HostIdentity } from "./host-identity";
 
 const CALLBACK_PATH = "/auth/callback" as const;
-const BRIDGE_URL = "https://codra-1b3bb.firebaseapp.com/desktop-auth";
+const IDENTITY_TOOLKIT_ORIGIN = "https://identitytoolkit.googleapis.com";
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const CANCEL_TIMEOUT_MS = 1_000;
 const MAX_CALLBACK_TARGET_BYTES = 4 * 1024;
@@ -43,6 +50,17 @@ export interface DesktopLoginCallback {
   attemptId: string;
   code: string;
   state: string;
+}
+
+export interface DesktopLoginGoogleAuthUriRequest {
+  url: string;
+  body: {
+    providerId: "google.com";
+    continueUri: string;
+    authFlowType: "CODE_FLOW";
+    sessionId: string;
+    context: string;
+  };
 }
 
 export interface DesktopLoginCallbackListener {
@@ -117,7 +135,8 @@ export function parseDesktopLoginCallback(
     attemptId !== expected.attemptId ||
     state !== expected.state ||
     typeof code !== "string" ||
-    !PkceVerifierSchema.safeParse(code).success
+    code.length < 1 ||
+    code.length > 4_096
   ) {
     return undefined;
   }
@@ -235,16 +254,6 @@ export async function createDesktopLoginCallbackListener(options: {
   return { port, waitForCallback: () => callback, close };
 }
 
-export function createDesktopLoginBridgeUrl(
-  attemptId: string,
-  state: string,
-): string {
-  const url = new URL(BRIDGE_URL);
-  url.searchParams.set("attempt", attemptId);
-  url.searchParams.set("state", state);
-  return url.toString();
-}
-
 export function desktopLoginFunctionUrl(
   runtime: FirebaseRuntime,
   name: "desktopLoginStart" | "desktopLoginRedeem" | "desktopLoginCancel",
@@ -255,6 +264,101 @@ export function desktopLoginFunctionUrl(
     `/${runtime.deployment.projectId}/${runtime.deployment.functionsRegion}/${name}`,
     runtime.deployment.functionsOrigin,
   ).toString();
+}
+
+export function createDesktopLoginGoogleAuthUriRequest(
+  runtime: FirebaseRuntime,
+  callbackUrl: string,
+  state: string,
+): DesktopLoginGoogleAuthUriRequest {
+  if (runtime.deployment.mode !== "production")
+    throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
+  const url = new URL("/v1/accounts:createAuthUri", IDENTITY_TOOLKIT_ORIGIN);
+  url.searchParams.set("key", runtime.deployment.publicConfig.apiKey);
+  return {
+    url: url.toString(),
+    body: {
+      providerId: "google.com",
+      continueUri: callbackUrl,
+      authFlowType: "CODE_FLOW",
+      sessionId: state,
+      context: state,
+    },
+  };
+}
+
+function parseGoogleAuthUriResponse(payload: unknown, state: string): string {
+  if (!payload || typeof payload !== "object")
+    throw new Error("DESKTOP_GOOGLE_AUTH_URI_INVALID");
+  const authUri = (payload as { authUri?: unknown }).authUri;
+  const sessionId = (payload as { sessionId?: unknown }).sessionId;
+  if (typeof authUri !== "string" || typeof sessionId !== "string")
+    throw new Error("DESKTOP_GOOGLE_AUTH_URI_INVALID");
+  if (sessionId !== state)
+    throw new Error("DESKTOP_GOOGLE_AUTH_SESSION_INVALID");
+  let parsed: URL;
+  try {
+    parsed = new URL(authUri);
+  } catch {
+    throw new Error("DESKTOP_GOOGLE_AUTH_URI_INVALID");
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== "accounts.google.com")
+    throw new Error("DESKTOP_GOOGLE_AUTH_URI_INVALID");
+  return parsed.toString();
+}
+
+async function createDesktopLoginGoogleAuthUri(
+  runtime: FirebaseRuntime,
+  dependencies: DesktopLoginDependencies,
+  callbackUrl: string,
+  state: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const request = createDesktopLoginGoogleAuthUriRequest(
+    runtime,
+    callbackUrl,
+    state,
+  );
+  const response = await postDesktopLoginJson(
+    dependencies,
+    request.url,
+    request.body,
+    signal,
+  );
+  return parseGoogleAuthUriResponse(response, state);
+}
+
+async function completeDesktopLoginGoogleAuth(
+  runtime: FirebaseRuntime,
+  dependencies: DesktopLoginDependencies,
+  callbackUrl: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const url = new URL("/v1/accounts:signInWithIdp", IDENTITY_TOOLKIT_ORIGIN);
+  if (runtime.deployment.mode !== "production")
+    throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
+  url.searchParams.set("key", runtime.deployment.publicConfig.apiKey);
+  const response = await postDesktopLoginJson(
+    dependencies,
+    url.toString(),
+    {
+      requestUri: callbackUrl,
+      sessionId,
+      returnSecureToken: true,
+      returnIdpCredential: true,
+    },
+    signal,
+  );
+  if (!response || typeof response !== "object")
+    throw new Error("DESKTOP_GOOGLE_AUTH_EXCHANGE_INVALID");
+  const oauthIdToken = (response as { oauthIdToken?: unknown }).oauthIdToken;
+  if (typeof oauthIdToken !== "string" || oauthIdToken.length === 0)
+    throw new Error("DESKTOP_GOOGLE_ID_TOKEN_MISSING");
+  await signInWithCredential(
+    runtime.auth,
+    GoogleAuthProvider.credential(oauthIdToken),
+  );
 }
 
 async function postDesktopLoginJson(
@@ -270,7 +374,19 @@ async function postDesktopLoginJson(
     signal,
   });
   const payload = await response.json().catch(() => undefined);
-  if (!response.ok) throw new Error("DESKTOP_LOGIN_FUNCTION_REQUEST_FAILED");
+  if (!response.ok) {
+    const message =
+      payload && typeof payload === "object"
+        ? (payload as { error?: { message?: unknown } }).error?.message
+        : undefined;
+    if (
+      typeof message === "string" &&
+      message.toLowerCase().includes("api key not valid")
+    ) {
+      throw new Error("FIREBASE_API_KEY_INVALID");
+    }
+    throw new Error("DESKTOP_LOGIN_FUNCTION_REQUEST_FAILED");
+  }
   return payload;
 }
 
@@ -317,8 +433,7 @@ export async function bootstrapProductionDesktopLogin(
   let nonce = createPkceVerifier(dependencies.randomBytes(32));
   let listener: DesktopLoginCallbackListener | undefined;
   let callbackResult:
-    | Promise<{ value: DesktopLoginCallback } | { error: unknown }>
-    | undefined;
+    Promise<{ value: DesktopLoginCallback } | { error: unknown }> | undefined;
   let cancelEligible = false;
   let completed = false;
   const abort = new AbortController();
@@ -336,11 +451,13 @@ export async function bootstrapProductionDesktopLogin(
   const bounded = <T>(work: Promise<T>): Promise<T> =>
     Promise.race([work, deadline]);
   try {
-    listener = await bounded(createDesktopLoginCallbackListener({
-      attemptId,
-      state,
-      timeoutMs: dependencies.timeoutMs,
-    }));
+    listener = await bounded(
+      createDesktopLoginCallbackListener({
+        attemptId,
+        state,
+        timeoutMs: dependencies.timeoutMs,
+      }),
+    );
     callbackResult = listener.waitForCallback().then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
@@ -380,16 +497,51 @@ export async function bootstrapProductionDesktopLogin(
         ? (startResponse as { serverNonce?: unknown }).serverNonce
         : undefined;
     if (serverNonce !== nonce) throw new Error("DESKTOP_LOGIN_START_INVALID");
-    await bounded(
-      dependencies.openExternal(createDesktopLoginBridgeUrl(attemptId, state)),
+    const callbackUrl = new URL(
+      `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`,
     );
+    callbackUrl.searchParams.set("attempt", attemptId);
+    const googleAuthUri = await bounded(
+      createDesktopLoginGoogleAuthUri(
+        runtime,
+        dependencies,
+        callbackUrl.toString(),
+        state,
+        abort.signal,
+      ),
+    );
+    await bounded(dependencies.openExternal(googleAuthUri));
     const callbackOutcome = await bounded(callbackResult);
     if ("error" in callbackOutcome) throw callbackOutcome.error;
     const callback = callbackOutcome.value;
+    const callbackRequestUri = new URL(callbackUrl);
+    callbackRequestUri.searchParams.set("code", callback.code);
+    callbackRequestUri.searchParams.set("state", callback.state);
+    await bounded(
+      completeDesktopLoginGoogleAuth(
+        runtime,
+        dependencies,
+        callbackRequestUri.toString(),
+        state,
+        abort.signal,
+      ),
+    );
+    const authorize = httpsCallable(runtime.functions, "authorizeDesktopLogin");
+    const authorization = DesktopLoginAllowResponseSchema.parse(
+      (
+        await bounded(
+          authorize({
+            action: "allow",
+            attemptId: callback.attemptId,
+            state: callback.state,
+          }),
+        )
+      ).data,
+    );
     const unsignedRedeem = {
       attemptId: callback.attemptId,
-      code: callback.code,
-      state: callback.state,
+      code: authorization.code,
+      state: authorization.state,
       nonce,
       pkceVerifier: verifier,
       deviceSignature: PLACEHOLDER_SIGNATURE,

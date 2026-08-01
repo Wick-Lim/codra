@@ -4,13 +4,13 @@
 
 **Goal:** Make production Electron standalone expose an explicit Google remote-login action and status without requiring `CODRA_ENABLE_REMOTE`.
 
-**Architecture:** Add a small validated remote IPC surface to the frozen desktop API. The Electron main process owns `RemoteHostController` state and invokes the existing system-browser bridge; preload forwards only validated state/actions; the renderer shows a sidebar remote-access panel. Local terminal startup remains independent, and remote-test keeps its compile-time emulator account adapter.
+**Architecture:** Add a small validated remote IPC surface to the frozen desktop API. The Electron main process owns `RemoteHostController` state and invokes Firebase Identity Toolkit's direct Google authorization URI with an ephemeral loopback callback; preload forwards only validated state/actions; the renderer shows a sidebar remote-access panel. Local terminal startup remains independent, and remote-test keeps its compile-time emulator account adapter.
 
 **Tech Stack:** Electron main/preload, React 19 renderer, TypeScript, Zod, Vitest.
 
 ## Global Constraints
 
-- Production login still uses `shell.openExternal` and the hosted `/desktop-auth` bridge.
+- Production login uses `shell.openExternal` for the Firebase-generated Google authorization URI and returns directly to the ephemeral `127.0.0.1` callback; the hosted `/desktop-auth` bridge is not part of the Electron flow.
 - `CODRA_ENABLE_REMOTE` is not required for production standalone login.
 - Device custom tokens and Firebase Auth state remain in Electron main memory.
 - Remote login failures must not prevent local terminal creation or input.
@@ -21,10 +21,12 @@
 ### Task 1: Freeze remote desktop IPC contracts
 
 **Files:**
+
 - Modify: `packages/protocol/src/desktop-api.ts`
 - Modify: `packages/protocol/test/desktop-api.test.ts` (or create if absent)
 
 **Interfaces:**
+
 - Add `RemoteHostStateSchema` and `RemoteHostState` values `idle | signing_in | online | error`.
 - Add `RemoteHostStatusSchema` with `{ state, message? }`.
 - Add IPC channels `remoteGetState`, `remoteLogin`, `remoteState`.
@@ -39,13 +41,15 @@
 ### Task 2: Wire main controller state and IPC
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/remote/host-controller.ts`
 - Create: `apps/desktop/src/main/ipc/remote-ipc.ts`
 - Create: `apps/desktop/src/main/ipc/remote-ipc.test.ts`
 - Modify: `apps/desktop/src/main/index.ts`
 
 **Interfaces:**
-- `RemoteHostController.login(): Promise<void>` force-starts the existing production bridge regardless of env.
+
+- `RemoteHostController.login(): Promise<void>` starts the direct production Google flow regardless of env.
 - `RemoteHostController.getStatus(): RemoteHostStatus` and `onStatusChanged(listener)` expose bounded state.
 - `registerRemoteIpc` handles `remoteGetState` and `remoteLogin`, authorizes the trusted renderer, and sends `remoteState` events.
 
@@ -59,6 +63,7 @@
 ### Task 3: Expose preload and renderer login panel
 
 **Files:**
+
 - Modify: `apps/desktop/src/preload/desktop-api.ts`
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Modify: `apps/desktop/src/renderer/src/terminal/TerminalSidebar.tsx`
@@ -66,6 +71,7 @@
 - Modify: `apps/desktop/src/renderer/src/terminal/TerminalSidebar.test.tsx`
 
 **Interfaces:**
+
 - Preload validates remote responses/events with protocol schemas.
 - Sidebar receives remote status and renders Google login/retry, signing-in, online, and error states.
 - Login click invokes `window.codra.remote.login()`; no Firebase code enters renderer.
