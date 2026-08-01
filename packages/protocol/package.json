@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./production": "./src/production.ts",
+    "./emulator": "./src/emulator.ts"
   },
   "scripts": {
     "test": "vitest run",

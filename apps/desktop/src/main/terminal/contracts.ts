@@ -2,6 +2,7 @@ import type {
   CreateTerminalRequest,
   TerminalDescriptor,
   TerminalOutputChunk,
+  TerminalOutputCursorReadResult,
 } from "@codra/protocol";
 
 export interface PtyHandle {
@@ -32,5 +33,10 @@ export interface TerminalOutputStore {
     afterSequence: number,
     limit: number,
   ): Promise<TerminalOutputChunk[]>;
+  readFromCursor?(
+    terminalId: string,
+    afterCursor: bigint,
+    maxBytes: number,
+  ): Promise<TerminalOutputCursorReadResult>;
   remove(terminalId: string): Promise<void>;
 }

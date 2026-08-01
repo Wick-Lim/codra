@@ -239,4 +239,48 @@ describe("FileTerminalOutputStore", () => {
     expect(() => store.pathFor("../outside")).toThrow();
     await expect(store.append("../outside", "data")).rejects.toThrow();
   });
+
+  it("reads absolute UTF-8 cursors and reports compaction truncation", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 1024);
+    await store.append(terminalId, "abc");
+    await store.append(terminalId, "한글");
+
+    await expect(
+      store.readFromCursor(terminalId, 0n, 100),
+    ).resolves.toMatchObject({
+      earliestCursor: 0n,
+      latestCursor: 9n,
+      truncated: false,
+      chunks: [
+        { sequence: 1n, startCursor: 0n, endCursor: 3n },
+        { sequence: 2n, startCursor: 3n, endCursor: 9n },
+      ],
+    });
+
+    for (let index = 0; index < 100; index += 1) {
+      await store.append(terminalId, `chunk-${index}`);
+    }
+    const replay = await store.readFromCursor(terminalId, 0n, 100_000);
+    expect(replay.truncated).toBe(true);
+    expect(replay.earliestCursor).toBeGreaterThan(0n);
+    expect(replay.latestCursor).toBeGreaterThan(replay.earliestCursor);
+  });
+
+  it("resumes a cursor from the middle of a chunk with an accurate end cursor", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 1024);
+    await store.append(terminalId, "abcdef");
+
+    const first = await store.readFromCursor(terminalId, 2n, 3);
+    expect(first.chunks[0]).toMatchObject({
+      startCursor: 2n,
+      endCursor: 5n,
+      data: new TextEncoder().encode("cde"),
+    });
+    const second = await store.readFromCursor(terminalId, 5n, 3);
+    expect(second.chunks[0]).toMatchObject({
+      startCursor: 5n,
+      endCursor: 6n,
+      data: new TextEncoder().encode("f"),
+    });
+  });
 });

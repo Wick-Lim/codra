@@ -10,7 +10,13 @@ export const CreateTerminalRequestSchema = TerminalSizeSchema.extend({
 });
 export const WriteTerminalRequestSchema = z.object({
   terminalId: TerminalIdSchema,
-  data: z.string().min(1).max(65_536),
+  data: z
+    .string()
+    .min(1)
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength <= 64 * 1024,
+      "Terminal input exceeds 64 KiB",
+    ),
 });
 export const ResizeTerminalRequestSchema = TerminalSizeSchema.extend({
   terminalId: TerminalIdSchema,
@@ -41,6 +47,20 @@ export interface TerminalOutputChunk {
   terminalId: string;
   sequence: number;
   data: string;
+}
+
+export interface TerminalOutputCursorChunk {
+  sequence: bigint;
+  startCursor: bigint;
+  endCursor: bigint;
+  data: Uint8Array;
+}
+
+export interface TerminalOutputCursorReadResult {
+  chunks: TerminalOutputCursorChunk[];
+  earliestCursor: bigint;
+  latestCursor: bigint;
+  truncated: boolean;
 }
 
 export const TerminalDescriptorSchema: z.ZodType<TerminalDescriptor> = z.object(

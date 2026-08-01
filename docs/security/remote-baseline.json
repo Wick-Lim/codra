@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "d417c313738fd2c5718746428caf5e57b9f4e9df",
+  "purpose": "remote-implementation-secret-scan"
+}
