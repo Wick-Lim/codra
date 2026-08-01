@@ -3,6 +3,8 @@ import {
   canonicalJson,
   canonicalPayloadDigest,
   P256SignatureSchema,
+  PkceChallengeSchema,
+  PkceVerifierSchema,
   PublicEcJwkSchema,
   ThumbprintSchema,
   createRfc7638Thumbprint,
@@ -80,6 +82,161 @@ export const RemoteDeviceSchema = z
     }
   });
 export type RemoteDevice = z.infer<typeof RemoteDeviceSchema>;
+
+export const DesktopLoginActionSchema = z.enum([
+  "register",
+  "resume",
+  "reenable",
+]);
+export type DesktopLoginAction = z.infer<typeof DesktopLoginActionSchema>;
+
+const desktopLoginStateSchema = PkceVerifierSchema;
+const desktopLoginCodeSchema = PkceVerifierSchema;
+const desktopLoginNonceSchema = PkceVerifierSchema;
+
+export const DesktopLoginStartRequestSchema = z
+  .object({
+    attemptId: deviceId,
+    action: DesktopLoginActionSchema,
+    deviceId,
+    displayName: z.string().min(1).max(200),
+    publicKeyJwk: PublicEcJwkSchema,
+    keyThumbprint: ThumbprintSchema,
+    pkceChallenge: PkceChallengeSchema,
+    stateHash: ThumbprintSchema,
+    nonce: desktopLoginNonceSchema,
+    callbackPort: z.number().int().min(1).max(65_535).safe(),
+    callbackPath: z.literal("/auth/callback"),
+    startSignature: P256SignatureSchema,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (createRfc7638Thumbprint(value.publicKeyJwk) !== value.keyThumbprint) {
+      context.addIssue({
+        code: "custom",
+        path: ["keyThumbprint"],
+        message: "Thumbprint does not match public key",
+      });
+    }
+  });
+export type DesktopLoginStartRequest = z.infer<
+  typeof DesktopLoginStartRequestSchema
+>;
+
+export const DesktopLoginAuthorizeRequestSchema = z
+  .object({
+    action: z.enum(["inspect", "allow"]),
+    attemptId: deviceId,
+    state: desktopLoginStateSchema,
+  })
+  .strict();
+export type DesktopLoginAuthorizeRequest = z.infer<
+  typeof DesktopLoginAuthorizeRequestSchema
+>;
+
+export const DesktopLoginRedeemRequestSchema = z
+  .object({
+    attemptId: deviceId,
+    code: desktopLoginCodeSchema,
+    state: desktopLoginStateSchema,
+    nonce: desktopLoginNonceSchema,
+    pkceVerifier: PkceVerifierSchema,
+    deviceSignature: P256SignatureSchema,
+  })
+  .strict();
+export type DesktopLoginRedeemRequest = z.infer<
+  typeof DesktopLoginRedeemRequestSchema
+>;
+
+export const DesktopLoginCancelRequestSchema = z
+  .object({
+    attemptId: deviceId,
+    state: desktopLoginStateSchema,
+  })
+  .strict();
+export type DesktopLoginCancelRequest = z.infer<
+  typeof DesktopLoginCancelRequestSchema
+>;
+
+export const DesktopLoginInspectResponseSchema = z
+  .object({
+    attemptId: deviceId,
+    action: DesktopLoginActionSchema,
+    displayName: z.string().min(1).max(200),
+    fingerprintSuffix: z.string().min(1).max(64),
+  })
+  .strict();
+export type DesktopLoginInspectResponse = z.infer<
+  typeof DesktopLoginInspectResponseSchema
+>;
+
+export const DesktopLoginAllowResponseSchema = z
+  .object({
+    attemptId: deviceId,
+    callbackUrl: z.url(),
+    state: desktopLoginStateSchema,
+    code: desktopLoginCodeSchema,
+  })
+  .strict();
+export type DesktopLoginAllowResponse = z.infer<
+  typeof DesktopLoginAllowResponseSchema
+>;
+
+export const DesktopLoginRedeemResponseSchema = z
+  .object({
+    token: nonEmptyText,
+    serverTimeMillis: timestamp,
+    device: RemoteDeviceSchema,
+  })
+  .strict();
+export type DesktopLoginRedeemResponse = z.infer<
+  typeof DesktopLoginRedeemResponseSchema
+>;
+
+export const DesktopLoginCancelResponseSchema = z
+  .object({ cancelled: z.boolean() })
+  .strict();
+export type DesktopLoginCancelResponse = z.infer<
+  typeof DesktopLoginCancelResponseSchema
+>;
+
+export function buildDesktopLoginStartSigningPayload(
+  request: DesktopLoginStartRequest,
+): Omit<DesktopLoginStartRequest, "startSignature"> {
+  const { startSignature, ...unsigned } =
+    DesktopLoginStartRequestSchema.parse(request);
+  void startSignature;
+  return unsigned;
+}
+
+const DesktopLoginRedeemSigningPayloadSchema = z
+  .object({
+    domain: z.literal("codra.desktop-login.redeem.v1"),
+    attemptId: deviceId,
+    code: desktopLoginCodeSchema,
+    state: desktopLoginStateSchema,
+    nonce: desktopLoginNonceSchema,
+    deviceId,
+    keyThumbprint: ThumbprintSchema,
+  })
+  .strict();
+export type DesktopLoginRedeemSigningPayload = z.infer<
+  typeof DesktopLoginRedeemSigningPayloadSchema
+>;
+
+export function buildDesktopLoginRedeemSigningPayload(input: {
+  attemptId: string;
+  code: string;
+  state: string;
+  nonce: string;
+  deviceId: string;
+  keyThumbprint: string;
+}): DesktopLoginRedeemSigningPayload {
+  return DesktopLoginRedeemSigningPayloadSchema.parse({
+    ...input,
+    domain: "codra.desktop-login.redeem.v1",
+  });
+}
 
 const immutableSessionShape = {
   sessionId: z.string().uuid(),
