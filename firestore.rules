@@ -1,0 +1,103 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isCustom() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'custom';
+    }
+
+    function claimDeviceId() {
+      return request.auth.token.codraDeviceId;
+    }
+
+    function claimThumbprint() {
+      return request.auth.token.codraKeyThumbprint;
+    }
+
+    function claimKind() {
+      return request.auth.token.codraDeviceKind;
+    }
+
+    function claimGeneration() {
+      return request.auth.token.codraDeviceGeneration;
+    }
+
+    function scopedDevice(uid) {
+      return isCustom()
+        && request.auth.uid == uid
+        && exists(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId()))
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.ownerUid == uid
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.deviceId == claimDeviceId()
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.keyThumbprint == claimThumbprint()
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.kind == claimKind()
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.generation == claimGeneration()
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(claimDeviceId())).data.active == true;
+    }
+
+    function isSessionParticipant(uid, data) {
+      return scopedDevice(uid)
+        && ((data.clientDeviceId == claimDeviceId()
+          && data.clientKeyThumbprint == claimThumbprint()
+          && data.clientDeviceGeneration == claimGeneration())
+          || (data.hostDeviceId == claimDeviceId()
+          && data.hostKeyThumbprint == claimThumbprint()
+          && data.hostDeviceGeneration == claimGeneration()));
+    }
+
+    function validSessionRequest(uid) {
+      return scopedDevice(uid)
+        && request.resource.data.ownerUid == uid
+        && request.resource.data.status == 'requested'
+        && request.resource.data.clientDeviceId == claimDeviceId()
+        && request.resource.data.clientKeyThumbprint == claimThumbprint()
+        && request.resource.data.clientDeviceGeneration == claimGeneration()
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt <= request.time + duration.value(8, 'h')
+        && exists(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId))
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.ownerUid == uid
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.deviceId == request.resource.data.hostDeviceId
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.kind == 'host'
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.active == true
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.remoteAccessEnabled == true
+        && get(/databases/$(database)/documents/users/$(uid)/devices/$(request.resource.data.hostDeviceId)).data.expiresAt > request.time;
+    }
+
+    match /users/{uid}/devices/{deviceId} {
+      allow get, list: if scopedDevice(uid)
+        && deviceId == claimDeviceId();
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid}/remoteSessions/{sessionId} {
+      allow get, list: if isSessionParticipant(uid, resource.data);
+      allow create: if validSessionRequest(uid);
+      allow update, delete: if false;
+
+      match /signals/{signalId} {
+        allow get, list: if isSessionParticipant(uid,
+          get(/databases/$(database)/documents/users/$(uid)/remoteSessions/$(sessionId)).data);
+        allow create: if isSessionParticipant(uid,
+            get(/databases/$(database)/documents/users/$(uid)/remoteSessions/$(sessionId)).data)
+          && request.resource.data.sessionId == sessionId
+          && request.resource.data.senderDeviceId == claimDeviceId()
+          && request.resource.data.signerThumbprint == claimThumbprint()
+          && request.resource.data.signerDeviceGeneration == claimGeneration()
+          && request.resource.data.createdAt == request.time
+          && request.resource.data.expiresAt > request.time
+          && request.resource.data.expiresAt <= request.time + duration.value(1, 'h');
+        allow update, delete: if false;
+      }
+    }
+
+    match /serverProofChallenges/{id} { allow read, write: if false; }
+    match /serverBootstrapRateLimits/{id} { allow read, write: if false; }
+    match /serverDesktopLoginTransactions/{id} { allow read, write: if false; }
+    match /serverLiveTestRuns/{id} { allow read, write: if false; }
+    match /serverDeviceSessionRegistries/{id} { allow read, write: if false; }
+    match /serverTurnRateLimits/{id} { allow read, write: if false; }
+    match /serverTurnIssuances/{id} { allow read, write: if false; }
+    match /serverTurnRevocationJobs/{id} { allow read, write: if false; }
+  }
+}

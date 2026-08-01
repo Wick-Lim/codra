@@ -1,0 +1,56 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "devices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "kind", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "remoteAccessEnabled", "order": "ASCENDING" },
+        { "fieldPath": "expiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "remoteSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hostDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "hostKeyThumbprint", "order": "ASCENDING" },
+        { "fieldPath": "hostDeviceGeneration", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "remoteSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "clientDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "clientKeyThumbprint", "order": "ASCENDING" },
+        { "fieldPath": "clientDeviceGeneration", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "signals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "senderDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "recipientDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "negotiationId", "order": "ASCENDING" },
+        { "fieldPath": "sequence", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "signals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "recipientDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "senderDeviceId", "order": "ASCENDING" },
+        { "fieldPath": "negotiationId", "order": "ASCENDING" },
+        { "fieldPath": "sequence", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

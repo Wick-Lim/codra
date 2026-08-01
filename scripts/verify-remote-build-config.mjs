@@ -149,6 +149,7 @@ for (const script of [
   "package:remote-test",
   "verify:native-package",
   "verify:remote-build-config",
+  "verify:firebase-indexes",
   "test:firebase-claim-canary",
   "resume:firebase-claim-canary",
 ]) {

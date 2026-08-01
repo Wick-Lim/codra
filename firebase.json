@@ -2,6 +2,10 @@
   "functions": {
     "source": "functions-deploy"
   },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
   "hosting": {
     "public": "apps/web/dist",
     "rewrites": [

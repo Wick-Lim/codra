@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@codra/protocol": "workspace:*",
-    "firebase": "12.17.0"
+    "firebase": "12.17.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "typescript": "5.9.3",

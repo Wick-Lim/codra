@@ -29,6 +29,7 @@
     "package:remote-test": "node scripts/package-remote-test.mjs",
     "verify:native-package": "node scripts/verify-node-datachannel-package.mjs",
     "verify:remote-build-config": "node scripts/verify-remote-build-config.mjs",
+    "verify:firebase-indexes": "node scripts/verify-firebase-indexes.mjs",
     "scan:client-artifacts": "node scripts/scan-client-artifacts.mjs",
     "test:release-remote-disabled": "playwright test tests/e2e/release-remote-disabled.spec.ts",
     "verify:remote-release": "node scripts/verify-remote-release.mjs",

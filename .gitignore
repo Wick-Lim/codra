@@ -8,6 +8,7 @@ test-results/
 .worktrees/
 .firebase/
 firebase-emulator-data/
+firestore-debug.log
 functions-deploy/lib/
 functions-deploy/vendor/
 functions-deploy/functions-component-manifest.json
