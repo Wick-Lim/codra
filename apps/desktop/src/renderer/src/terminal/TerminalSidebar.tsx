@@ -1,4 +1,4 @@
-import type { TerminalDescriptor } from "@codra/protocol";
+import type { RemoteHostStatus, TerminalDescriptor } from "@codra/protocol";
 import React from "react";
 
 export interface TerminalSidebarProps {
@@ -7,6 +7,8 @@ export interface TerminalSidebarProps {
   onCreate?: () => void;
   onSelect?: (terminalId: string) => void;
   onClose?: (terminalId: string) => void;
+  remoteStatus?: RemoteHostStatus;
+  onRemoteLogin?: () => void;
 }
 
 function cwdBasename(cwd: string): string {
@@ -20,6 +22,8 @@ export function TerminalSidebar({
   onCreate,
   onSelect,
   onClose,
+  remoteStatus = { state: "idle" },
+  onRemoteLogin,
 }: TerminalSidebarProps) {
   return (
     <React.Fragment>
@@ -98,6 +102,51 @@ export function TerminalSidebar({
             </ol>
           )}
         </nav>
+
+        <section className="remote-panel" aria-label="Remote access">
+          <div className="remote-panel-heading">
+            <p className="registry-heading">Remote access</p>
+            <span className="remote-state" data-state={remoteStatus.state}>
+              {remoteStatus.state === "online"
+                ? "Online"
+                : remoteStatus.state === "signing_in"
+                  ? "Signing in"
+                  : remoteStatus.state === "error"
+                    ? "Needs attention"
+                    : "Offline"}
+            </span>
+          </div>
+          {remoteStatus.state === "signing_in" ? (
+            <p className="remote-message" role="status">
+              브라우저에서 Google 로그인 중…
+            </p>
+          ) : remoteStatus.state === "online" ? (
+            <p className="remote-message" role="status">
+              원격 연결됨
+            </p>
+          ) : remoteStatus.state === "error" ? (
+            <React.Fragment>
+              <p className="remote-message" role="alert">
+                {remoteStatus.message ?? "원격 로그인에 실패했습니다."}
+              </p>
+              <button
+                className="remote-login-button"
+                type="button"
+                onClick={onRemoteLogin}
+              >
+                다시 로그인
+              </button>
+            </React.Fragment>
+          ) : (
+            <button
+              className="remote-login-button"
+              type="button"
+              onClick={onRemoteLogin}
+            >
+              Google로 로그인
+            </button>
+          )}
+        </section>
       </aside>
     </React.Fragment>
   );

@@ -378,6 +378,66 @@ button:focus-visible {
   flex: 1;
 }
 
+.remote-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--hairline);
+  background: var(--graphite-850);
+}
+
+.remote-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.remote-panel .registry-heading {
+  padding: 0;
+}
+
+.remote-state {
+  color: var(--text-muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.remote-state[data-state="online"] {
+  color: var(--accent-cyan);
+}
+
+.remote-state[data-state="error"] {
+  color: #f2b880;
+}
+
+.remote-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.remote-login-button {
+  min-height: 28px;
+  padding: 5px 8px;
+  color: var(--graphite-950);
+  background: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.remote-login-button:hover {
+  color: var(--graphite-950);
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
 @media (max-width: 900px) {
   .workspace-grid {
     grid-template-columns: 176px minmax(0, 1fr);

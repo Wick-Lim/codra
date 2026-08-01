@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   CodraDesktopApi,
+  RemoteHostStatus,
   TerminalDescriptor,
   TerminalOutputChunk,
 } from "@codra/protocol";
@@ -175,6 +176,43 @@ const exitedTerminal: TerminalDescriptor = {
 };
 
 describe("TerminalSidebar", () => {
+  it("exposes an explicit Google remote-login action and bounded status", async () => {
+    const onRemoteLogin = vi.fn();
+    const { rerender } = render(
+      <TerminalSidebar
+        terminals={[]}
+        activeId={null}
+        remoteStatus={{ state: "idle" }}
+        onRemoteLogin={onRemoteLogin}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Google로 로그인" }));
+    expect(onRemoteLogin).toHaveBeenCalledOnce();
+
+    rerender(
+      <TerminalSidebar
+        terminals={[]}
+        activeId={null}
+        remoteStatus={{ state: "signing_in" }}
+        onRemoteLogin={onRemoteLogin}
+      />,
+    );
+    expect(screen.getByText("브라우저에서 Google 로그인 중…")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Google로 로그인" })).toBeNull();
+
+    const online: RemoteHostStatus = { state: "online" };
+    rerender(
+      <TerminalSidebar
+        terminals={[]}
+        activeId={null}
+        remoteStatus={online}
+        onRemoteLogin={onRemoteLogin}
+      />,
+    );
+    expect(screen.getByText("원격 연결됨")).toBeVisible();
+  });
+
   it("shows terminal identity, cwd basename, and retained exit state", () => {
     render(
       <TerminalSidebar
@@ -741,5 +779,19 @@ describe("App terminal workspace", () => {
     ).toHaveAttribute("data-terminal-id", runningTerminal.id);
     expect(screen.getByRole("status")).toHaveTextContent("Running");
     expect(screen.getByRole("status")).toHaveTextContent("100 × 30");
+  });
+
+  it("loads remote state and starts the system-browser login from the panel", async () => {
+    const api = createPaneApi();
+    Object.defineProperty(window, "codra", {
+      configurable: true,
+      value: api,
+    });
+
+    render(React.createElement(App));
+
+    await screen.findByRole("button", { name: "Google로 로그인" });
+    await userEvent.click(screen.getByRole("button", { name: "Google로 로그인" }));
+    expect(api.remote.login).toHaveBeenCalledOnce();
   });
 });

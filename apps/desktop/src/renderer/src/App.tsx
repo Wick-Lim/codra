@@ -1,4 +1,5 @@
 import React from "react";
+import type { RemoteHostStatus } from "@codra/protocol";
 import { TerminalPane } from "./terminal/TerminalPane";
 import { TerminalSidebar } from "./terminal/TerminalSidebar";
 import { useTerminals } from "./terminal/useTerminals";
@@ -12,6 +13,31 @@ export default function App() {
     selectTerminal,
     closeTerminal,
   } = useTerminals();
+  const [remoteStatus, setRemoteStatus] = React.useState<RemoteHostStatus>({
+    state: "idle",
+  });
+
+  React.useEffect(() => {
+    const stopListening = window.codra.remote.onStateChanged(setRemoteStatus);
+    void window.codra.remote
+      .getState()
+      .then(setRemoteStatus)
+      .catch(() => setRemoteStatus({ state: "error", message: "REMOTE_STATUS_UNAVAILABLE" }));
+    return stopListening;
+  }, []);
+
+  async function loginRemote(): Promise<void> {
+    setRemoteStatus({ state: "signing_in" });
+    try {
+      setRemoteStatus(await window.codra.remote.login());
+    } catch {
+      try {
+        setRemoteStatus(await window.codra.remote.getState());
+      } catch {
+        setRemoteStatus({ state: "error", message: "REMOTE_LOGIN_FAILED" });
+      }
+    }
+  }
   const stateLabel = activeTerminal
     ? activeTerminal.state === "running"
       ? "Running"
@@ -28,6 +54,8 @@ export default function App() {
             onCreate={() => void createTerminal()}
             onSelect={selectTerminal}
             onClose={(terminalId) => void closeTerminal(terminalId)}
+            remoteStatus={remoteStatus}
+            onRemoteLogin={() => void loginRemote()}
           />
 
           <section

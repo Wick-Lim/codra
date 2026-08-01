@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { bootstrapDesktop } from "./bootstrap";
 import { registerTerminalIpc } from "./ipc/terminal-ipc";
 import { registerRemoteIpc } from "./ipc/remote-ipc";
+import { remoteFirebaseConfigBinding } from "@codra/remote-firebase-config";
 import { DesktopLifecycle } from "./lifecycle";
 import { TerminalManager } from "./terminal/manager";
 import { NodePtyFactory } from "./terminal/node-pty";
@@ -100,6 +101,7 @@ async function startPrimaryInstance(): Promise<void> {
         .catch((error) => console.error("Remote approval failed", error));
     },
   });
+  const autoStartRemote = remoteFirebaseConfigBinding === "production-main";
 
   registerRemoteIpc({
     ipc: ipcMain,
@@ -126,7 +128,7 @@ async function startPrimaryInstance(): Promise<void> {
     registerIpc: registerTerminalIpc,
     createLifecycle: (options) => new DesktopLifecycle(options),
     createWindow,
-    startRemoteHost: () => remoteHost.start(),
+    startRemoteHost: () => remoteHost.start(autoStartRemote),
     stopRemoteHost: () => remoteHost.stop(),
     confirmQuit: (activeTerminals) =>
       confirmQuitWithActiveTerminals(activeTerminals.length),
