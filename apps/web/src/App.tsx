@@ -6,6 +6,7 @@ import {
   BrowserRemoteController,
   type BrowserRemoteState,
 } from "./remote/controller";
+import DesktopAuthBridge from "./remote/DesktopAuthBridge";
 import "./styles.css";
 
 function LoginScreen({
@@ -62,7 +63,7 @@ function sessionLabel(session: RemoteSession): string {
   return session.status;
 }
 
-function App(): ReactElement {
+function RemoteConsoleApp(): ReactElement {
   const controller = useMemo(() => new BrowserRemoteController(), []);
   const [path, setPath] = useState(() => window.location.pathname);
   const [state, setState] = useState<BrowserRemoteState>();
@@ -275,6 +276,11 @@ function App(): ReactElement {
       </p>
     </main>
   );
+}
+
+function App(): ReactElement {
+  if (window.location.pathname === "/desktop-auth") return <DesktopAuthBridge />;
+  return <RemoteConsoleApp />;
 }
 
 export default App;

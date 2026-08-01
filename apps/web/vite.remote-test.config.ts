@@ -19,6 +19,10 @@ export default defineConfig({
         __dirname,
         "src/remote/firebase-emulator.ts",
       ),
+      "@codra/web-desktop-auth-bridge": resolve(
+        __dirname,
+        "src/remote/DesktopAuthBridgeTestOnly.tsx",
+      ),
     },
   },
 });

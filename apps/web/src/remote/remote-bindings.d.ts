@@ -14,3 +14,10 @@ declare module "@codra/web-firebase-config" {
   export const webFirebaseConfigBinding: string;
   export function createRemoteFirebaseRuntime(): FirebaseRuntime;
 }
+
+declare module "@codra/web-desktop-auth-bridge" {
+  import type { ComponentType } from "react";
+
+  const DesktopAuthBridge: ComponentType;
+  export default DesktopAuthBridge;
+}
