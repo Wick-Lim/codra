@@ -14,7 +14,7 @@
     "test:e2e": "pnpm build && playwright test --project=dev-electron",
     "test:packaged": "playwright test --project=packaged-electron",
     "package:archive": "node scripts/archive-host-app.mjs",
-    "firebase:emulators": "pnpm --filter @codra/protocol build && pnpm --filter @codra/functions build && pnpm run stage:functions-deploy && pnpm --dir functions-deploy-build install --frozen-lockfile --ignore-scripts --ignore-workspace && firebase emulators:start --config firebase.json --project demo-codra",
+    "firebase:emulators": "pnpm --filter @codra/protocol build && pnpm --filter @codra/functions build && pnpm run stage:functions-deploy && pnpm --dir functions-deploy-build install --frozen-lockfile && firebase emulators:start --config firebase.json --project demo-codra",
     "test:firebase-rules": "pnpm --filter @codra/firebase test:rules",
     "stage:functions-deploy": "node scripts/stage-functions-deploy.mjs",
     "test:functions-deploy-artifact": "node scripts/test-functions-deploy-artifact.mjs",

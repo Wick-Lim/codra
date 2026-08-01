@@ -189,6 +189,17 @@ const files = [
   ["package.json", packageJson],
   [".npmrc", deployNpmrc],
   ["pnpm-lock.yaml", deployLock],
+  ...(fixture
+    ? []
+    : [
+        [
+          "pnpm-workspace.yaml",
+          Buffer.from(
+            'allowBuilds:\n  "@firebase/util": true\n  protobufjs: true\n',
+            "utf8",
+          ),
+        ],
+      ]),
 ];
 for (const [relative, contents] of files) {
   await writeFile(resolve(target, relative), contents, { mode: 0o644 });
