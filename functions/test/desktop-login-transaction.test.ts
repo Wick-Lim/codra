@@ -291,6 +291,25 @@ describe("desktop login transaction Functions", () => {
         },
       } as never),
     ).rejects.toThrow("RECENT_GOOGLE_AUTH_REQUIRED");
+    await expect(
+      authorizeDesktopLogin.run({
+        data: {},
+        auth: {
+          uid: ownerUid,
+          token: {
+            firebase: { sign_in_provider: "google.com" },
+            auth_time: Math.ceil((Date.now() + 31_000) / 1000),
+          },
+        },
+      } as never),
+    ).rejects.toThrow("RECENT_GOOGLE_AUTH_REQUIRED");
+  });
+
+  it("rejects malformed start payloads before creating a transaction", async () => {
+    const res = response();
+    await desktopLoginStart(rawRequest({}) as never, res as never);
+    expect(res.body).toEqual({ error: "INVALID_REQUEST" });
+    expect(fake.documents.size).toBe(0);
   });
 
   it("rejects a start binding signed by the wrong device key", async () => {
@@ -337,6 +356,24 @@ describe("desktop login transaction Functions", () => {
     const identity = await p256Identity();
     const started = await startAttempt({ identity });
     const code = await authorize(attemptId, started.state);
+    const wrongCode = await redeem({
+      attempt: attemptId,
+      code: createPkceVerifier(new Uint8Array(32).fill(6)),
+      state: started.state,
+      nonce: started.nonce,
+      verifier: started.verifier,
+      identity,
+    });
+    expect(wrongCode.body).toEqual({ error: "LOGIN_CODE_INVALID" });
+    const wrongState = await redeem({
+      attempt: attemptId,
+      code,
+      state: createPkceVerifier(new Uint8Array(32).fill(10)),
+      nonce: started.nonce,
+      verifier: started.verifier,
+      identity,
+    });
+    expect(wrongState.body).toEqual({ error: "LOGIN_STATE_INVALID" });
     const wrongNonce = await redeem({
       attempt: attemptId,
       code,
