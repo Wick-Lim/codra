@@ -98,6 +98,30 @@ function createPaneApi(
   };
 }
 
+function chunk(
+  sequence: number,
+  data = `chunk ${sequence}\r\n`,
+): TerminalOutputChunk {
+  return {
+    terminalId: runningTerminal.id,
+    sequence,
+    data,
+  };
+}
+
+function deferred<T>() {
+  let resolve: ((value: T) => void) | undefined;
+  const promise = new Promise<T>((finish) => {
+    resolve = finish;
+  });
+  return {
+    promise,
+    resolve(value: T) {
+      resolve?.(value);
+    },
+  };
+}
+
 const runningTerminal: TerminalDescriptor = {
   id: "2a1e20df-860f-4f29-a2c3-b2f28d44c2e5",
   title: "api",
@@ -155,13 +179,39 @@ describe("TerminalSidebar", () => {
     });
     expect(terminalButton).toHaveAttribute("aria-current", "true");
 
-    await user.click(screen.getByRole("button", { name: "New terminal" }));
-    await user.click(terminalButton);
-    await user.click(screen.getByRole("button", { name: "Close api" }));
+    await user.tab();
+    expect(screen.getByRole("button", { name: "New terminal" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(terminalButton).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Close api" })).toHaveFocus();
+    await user.keyboard(" ");
 
     expect(onCreate).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith(runningTerminal.id);
     expect(onClose).toHaveBeenCalledWith(runningTerminal.id);
+  });
+
+  it("keeps a long pane registry inside a scrollable sidebar track", () => {
+    const terminals = Array.from({ length: 30 }, (_, index) => ({
+      ...runningTerminal,
+      id: `terminal-${index + 1}`,
+      title: `shell ${index + 1}`,
+    }));
+    const { container } = render(
+      <TerminalSidebar terminals={terminals} activeId={terminals[0]!.id} />,
+    );
+
+    const sidebar = container.querySelector(".terminal-sidebar");
+    const registry = screen.getByRole("navigation", { name: "Terminals" });
+    expect(sidebar).toContainElement(registry);
+    expect(registry).toHaveAttribute("data-scroll-region", "pane-registry");
+    expect(registry.querySelectorAll(".terminal-list-item")).toHaveLength(30);
+    expect(
+      screen.getByRole("button", { name: "shell 30, api, Running" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -248,6 +298,166 @@ describe("TerminalPane", () => {
       terminalId: runningTerminal.id,
       data: "pwd\r",
     });
+  });
+
+  it("paginates replay and deduplicates overlapping live output", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay)
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([chunk(1001, "replayed 1001\r\n")]);
+
+    render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[
+          chunk(1001, "live duplicate 1001\r\n"),
+          chunk(1002, "live 1002\r\n"),
+        ]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledTimes(1002);
+    });
+    expect(vi.mocked(api.terminal.replay).mock.calls).toEqual([
+      [
+        {
+          terminalId: runningTerminal.id,
+          afterSequence: 0,
+          limit: 1000,
+        },
+      ],
+      [
+        {
+          terminalId: runningTerminal.id,
+          afterSequence: 1000,
+          limit: 1000,
+        },
+      ],
+    ]);
+    expect(xtermMocks.terminals[0]?.write.mock.calls[1000]).toEqual([
+      "replayed 1001\r\n",
+    ]);
+    expect(xtermMocks.terminals[0]?.write).toHaveBeenLastCalledWith(
+      "live 1002\r\n",
+    );
+  });
+
+  it("buffers live sequence gaps until the missing chunk arrives", async () => {
+    const api = createPaneApi([chunk(1, "$ ")]);
+    const { rerender } = render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(3, "three\r\n"), chunk(3, "three\r\n")]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith("$ ");
+    });
+    expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([["$ "]]);
+
+    rerender(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[
+          chunk(3, "three\r\n"),
+          chunk(2, "two\r\n"),
+          chunk(3, "three\r\n"),
+        ]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([
+        ["$ "],
+        ["two\r\n"],
+        ["three\r\n"],
+      ]);
+    });
+  });
+
+  it("uses a compacted replay as the live sequence baseline", async () => {
+    const api = createPaneApi([chunk(10, "ten\r\n"), chunk(12, "twelve\r\n")]);
+    render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(13, "thirteen\r\n")]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([
+        ["ten\r\n"],
+        ["twelve\r\n"],
+        ["thirteen\r\n"],
+      ]);
+    });
+  });
+
+  it("cancels a stale replay page when the active terminal changes", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const stalePage = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay).mockImplementation((request) => {
+      if (request.terminalId === exitedTerminal.id) return Promise.resolve([]);
+      if (request.afterSequence === 0) return Promise.resolve(firstPage);
+      return stalePage.promise;
+    });
+    const { rerender } = render(
+      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+    );
+    const staleXterm = xtermMocks.terminals[0];
+    await waitFor(() => {
+      expect(api.terminal.replay).toHaveBeenCalledWith({
+        terminalId: runningTerminal.id,
+        afterSequence: 1000,
+        limit: 1000,
+      });
+    });
+
+    rerender(<TerminalPane terminal={exitedTerminal} output={[]} api={api} />);
+    await act(async () => {
+      stalePage.resolve([chunk(1001)]);
+      await stalePage.promise;
+    });
+
+    expect(staleXterm?.write).not.toHaveBeenCalled();
+  });
+
+  it("cancels a stale replay page after unmount", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const stalePage = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay)
+      .mockResolvedValueOnce(firstPage)
+      .mockReturnValueOnce(stalePage.promise);
+    const { unmount } = render(
+      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+    );
+    const staleXterm = xtermMocks.terminals[0];
+    await waitFor(() => {
+      expect(api.terminal.replay).toHaveBeenCalledTimes(2);
+    });
+
+    unmount();
+    await act(async () => {
+      stalePage.resolve([chunk(1001)]);
+      await stalePage.promise;
+    });
+
+    expect(staleXterm?.write).not.toHaveBeenCalled();
   });
 
   it("keeps one lifecycle for descriptor updates and cleans up on terminal change", async () => {

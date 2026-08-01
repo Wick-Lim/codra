@@ -81,6 +81,16 @@ describe("useTerminals", () => {
     expect(fake.api.terminal.onOutput).toHaveBeenCalledOnce();
     expect(fake.api.terminal.onChanged).toHaveBeenCalledOnce();
     expect(fake.api.terminal.list).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(fake.api.terminal.onOutput).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(fake.api.terminal.list).mock.invocationCallOrder[0]!,
+    );
+    expect(
+      vi.mocked(fake.api.terminal.onChanged).mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      vi.mocked(fake.api.terminal.list).mock.invocationCallOrder[0]!,
+    );
 
     act(() => {
       fake.emitChanged({ ...firstTerminal, title: "api — ready" });

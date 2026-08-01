@@ -55,7 +55,10 @@ button:focus-visible {
 }
 
 .terminal-sidebar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   background: var(--graphite-900);
   border-right: 1px solid var(--hairline);
@@ -119,6 +122,7 @@ button:focus-visible {
 .terminal-registry {
   min-height: 0;
   padding-top: 12px;
+  overflow-y: auto;
 }
 
 .registry-heading {

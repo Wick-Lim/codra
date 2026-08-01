@@ -39,7 +39,11 @@ export function TerminalSidebar({
           </button>
         </header>
 
-        <nav className="terminal-registry" aria-label="Terminals">
+        <nav
+          className="terminal-registry"
+          aria-label="Terminals"
+          data-scroll-region="pane-registry"
+        >
           <p className="registry-heading">Panes</p>
           {terminals.length === 0 ? (
             <p className="empty-terminals">

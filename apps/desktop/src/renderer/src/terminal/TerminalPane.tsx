@@ -17,8 +17,8 @@ export interface TerminalPaneProps {
 interface TerminalRuntime {
   terminalId: string;
   xterm: XtermTerminal;
-  pending: Map<number, TerminalOutputChunk>;
-  written: Set<number>;
+  pendingLive: Map<number, TerminalOutputChunk>;
+  lastWrittenSequence: number;
   replayReady: boolean;
   disposed: boolean;
 }
@@ -26,15 +26,78 @@ interface TerminalRuntime {
 function flushOutput(runtime: TerminalRuntime): void {
   if (!runtime.replayReady || runtime.disposed) return;
 
-  const chunks = [...runtime.pending.values()].sort(
+  let nextSequence = runtime.lastWrittenSequence + 1;
+  let chunk = runtime.pendingLive.get(nextSequence);
+  while (chunk) {
+    runtime.xterm.write(chunk.data);
+    runtime.pendingLive.delete(nextSequence);
+    runtime.lastWrittenSequence = nextSequence;
+    nextSequence += 1;
+    chunk = runtime.pendingLive.get(nextSequence);
+  }
+}
+
+function finishReplay(
+  runtime: TerminalRuntime,
+  replayed: ReadonlyMap<number, TerminalOutputChunk>,
+): void {
+  if (runtime.disposed) return;
+
+  const replayChunks = [...replayed.values()].sort(
     (left, right) => left.sequence - right.sequence,
   );
-  runtime.pending.clear();
-  for (const chunk of chunks) {
-    if (runtime.written.has(chunk.sequence)) continue;
-    runtime.xterm.write(chunk.data);
-    runtime.written.add(chunk.sequence);
+  for (const chunk of replayChunks) runtime.xterm.write(chunk.data);
+  runtime.lastWrittenSequence = replayChunks.at(-1)?.sequence ?? 0;
+  for (const sequence of runtime.pendingLive.keys()) {
+    if (sequence <= runtime.lastWrittenSequence) {
+      runtime.pendingLive.delete(sequence);
+    }
   }
+  runtime.replayReady = true;
+  flushOutput(runtime);
+}
+
+async function replayAll(
+  runtime: TerminalRuntime,
+  api: CodraDesktopApi,
+): Promise<void> {
+  const pageSize = 1000;
+  const replayed = new Map<number, TerminalOutputChunk>();
+  let afterSequence = 0;
+
+  try {
+    while (!runtime.disposed) {
+      const page = await api.terminal.replay({
+        terminalId: runtime.terminalId,
+        afterSequence,
+        limit: pageSize,
+      });
+      if (runtime.disposed) return;
+
+      for (const chunk of page) {
+        if (
+          chunk.terminalId === runtime.terminalId &&
+          !replayed.has(chunk.sequence)
+        ) {
+          replayed.set(chunk.sequence, chunk);
+        }
+      }
+      if (page.length < pageSize) break;
+
+      const nextAfterSequence = page.at(-1)?.sequence;
+      if (
+        nextAfterSequence === undefined ||
+        nextAfterSequence <= afterSequence
+      ) {
+        break;
+      }
+      afterSequence = nextAfterSequence;
+    }
+  } catch {
+    // Keep the live terminal usable when persisted scrollback is unavailable.
+  }
+
+  finishReplay(runtime, replayed);
 }
 
 export function TerminalPane({
@@ -75,8 +138,8 @@ export function TerminalPane({
     const runtime: TerminalRuntime = {
       terminalId: terminal.id,
       xterm,
-      pending: new Map(),
-      written: new Set(),
+      pendingLive: new Map(),
+      lastWrittenSequence: 0,
       replayReady: false,
       disposed: false,
     };
@@ -113,22 +176,7 @@ export function TerminalPane({
     resizeObserver.observe(host);
     scheduleResize();
 
-    void api.terminal
-      .replay({ terminalId: terminal.id, afterSequence: 0, limit: 1000 })
-      .then(
-        (chunks) => {
-          if (runtime.disposed) return;
-          for (const chunk of chunks)
-            runtime.pending.set(chunk.sequence, chunk);
-          runtime.replayReady = true;
-          flushOutput(runtime);
-        },
-        () => {
-          if (runtime.disposed) return;
-          runtime.replayReady = true;
-          flushOutput(runtime);
-        },
-      );
+    void replayAll(runtime, api);
 
     return () => {
       runtime.disposed = true;
@@ -148,9 +196,10 @@ export function TerminalPane({
     for (const chunk of output) {
       if (
         chunk.terminalId === runtime.terminalId &&
-        !runtime.written.has(chunk.sequence)
+        chunk.sequence > runtime.lastWrittenSequence &&
+        !runtime.pendingLive.has(chunk.sequence)
       ) {
-        runtime.pending.set(chunk.sequence, chunk);
+        runtime.pendingLive.set(chunk.sequence, chunk);
       }
     }
     flushOutput(runtime);
