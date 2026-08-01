@@ -169,6 +169,22 @@ if (fixture) {
     ),
   ]);
   protocolTarball = createDeterministicPackageTarball(protocolEntries);
+  deployLock = sourceLock;
+  // The protocol package is rebuilt into a fresh deterministic tarball on
+  // every stage. Keep the self-contained deployment lockfile's local-file
+  // integrity aligned with that exact byte sequence so Firebase's install
+  // step can continue to use --frozen-lockfile.
+  const protocolIntegrity = createHash("sha512")
+    .update(protocolTarball)
+    .digest("base64");
+  const lockText = deployLock.toString("utf8");
+  const lockWithProtocolIntegrity = lockText.replace(
+    /(  '@codra\/protocol@file:vendor\/codra-protocol-0\.0\.1\.tgz':\n    resolution: \{integrity: sha512-)[^,]+/u,
+    `$1${protocolIntegrity}`,
+  );
+  if (lockWithProtocolIntegrity === lockText)
+    throw new Error("Could not update staged protocol tarball integrity.");
+  deployLock = Buffer.from(lockWithProtocolIntegrity, "utf8");
   functionFiles = (await collectFiles(functionsDist, "lib")).filter(
     ([relative]) =>
       !relative.endsWith(".map") &&
@@ -180,7 +196,6 @@ if (fixture) {
     addNodeEsmExtensions(contents),
   ]);
   packageJson = sourcePackage;
-  deployLock = sourceLock;
 }
 
 const files = [
