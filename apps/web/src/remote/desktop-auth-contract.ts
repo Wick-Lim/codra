@@ -43,6 +43,8 @@ export function createDesktopCallbackNavigation(
   if (
     callback.protocol !== "http:" ||
     callback.hostname !== "127.0.0.1" ||
+    callback.username !== "" ||
+    callback.password !== "" ||
     callback.pathname !== "/auth/callback" ||
     !callback.port ||
     callback.search ||

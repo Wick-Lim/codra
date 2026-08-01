@@ -64,7 +64,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "DESKTOP_AUTH_FAILED";
 }
 
-export default function DesktopAuthBridgeGoogle(): ReactElement {
+export interface DesktopAuthBridgeGoogleProps {
+  onNavigate?: (url: string) => void;
+}
+
+export default function DesktopAuthBridgeGoogle({
+  onNavigate = (url) => window.location.replace(url),
+}: DesktopAuthBridgeGoogleProps = {}): ReactElement {
   const query = parseDesktopAuthQuery(window.location.search);
   const [busy, setBusy] = useState(true);
   const [message, setMessage] = useState("");
@@ -191,7 +197,7 @@ export default function DesktopAuthBridgeGoogle(): ReactElement {
       callbackNavigated.current = true;
       clearRedirectState();
       await signOut(bridgeAuth);
-      window.location.replace(navigation);
+      onNavigate(navigation);
     } catch (error) {
       clearRedirectState();
       await signOut(bridgeAuth).catch(() => undefined);
