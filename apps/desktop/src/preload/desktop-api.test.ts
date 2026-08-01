@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { IPC_CHANNELS, type TerminalDescriptor } from "@codra/protocol";
+import {
+  IPC_CHANNELS,
+  type RemoteHostStatus,
+  type TerminalDescriptor,
+} from "@codra/protocol";
 import { createDesktopApi, type IpcRendererLike } from "./desktop-api";
 
 type Listener = (event: unknown, payload: unknown) => void;
@@ -47,6 +51,33 @@ const descriptor: TerminalDescriptor = {
 };
 
 describe("createDesktopApi", () => {
+  it("routes remote login actions and filters remote state events", async () => {
+    const ipc = new FakeIpcRenderer(
+      new Map<string, unknown>([
+        [IPC_CHANNELS.remoteGetState, { state: "idle" }],
+        [IPC_CHANNELS.remoteLogin, { state: "online" }],
+      ]),
+    );
+    const api = createDesktopApi(ipc);
+    const received: RemoteHostStatus[] = [];
+    api.remote.onStateChanged((status) => received.push(status));
+
+    await expect(api.remote.getState()).resolves.toEqual({ state: "idle" });
+    await expect(api.remote.login()).resolves.toEqual({ state: "online" });
+    ipc.emit(IPC_CHANNELS.remoteState, { state: "signing_in" });
+    ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "" });
+    ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "REMOTE_LOGIN_FAILED" });
+
+    expect(received).toEqual([
+      { state: "signing_in" },
+      { state: "error", message: "REMOTE_LOGIN_FAILED" },
+    ]);
+    expect(ipc.invocations.slice(-2)).toEqual([
+      { channel: IPC_CHANNELS.remoteGetState, args: [] },
+      { channel: IPC_CHANNELS.remoteLogin, args: [] },
+    ]);
+  });
+
   it("routes every terminal invocation through its frozen channel", async () => {
     const ipc = new FakeIpcRenderer(
       new Map<string, unknown>([

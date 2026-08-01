@@ -2,6 +2,7 @@ import {
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   ReplayTerminalRequestSchema,
+  RemoteHostStatusSchema,
   ResizeTerminalRequestSchema,
   TerminalDescriptorSchema,
   TerminalIdSchema,
@@ -95,6 +96,27 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
 
         ipc.on(IPC_CHANNELS.terminalChanged, wrapped);
         return () => ipc.removeListener(IPC_CHANNELS.terminalChanged, wrapped);
+      },
+    },
+    remote: {
+      async getState() {
+        return RemoteHostStatusSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteGetState),
+        );
+      },
+      async login() {
+        return RemoteHostStatusSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteLogin),
+        );
+      },
+      onStateChanged(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = RemoteHostStatusSchema.safeParse(payload);
+          if (parsed.success) listener(parsed.data);
+        };
+
+        ipc.on(IPC_CHANNELS.remoteState, wrapped);
+        return () => ipc.removeListener(IPC_CHANNELS.remoteState, wrapped);
       },
     },
   };

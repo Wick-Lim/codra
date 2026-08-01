@@ -41,6 +41,11 @@ function createDesktopApiFake() {
         return stopChanged;
       }),
     },
+    remote: {
+      getState: vi.fn().mockResolvedValue({ state: "idle" }),
+      login: vi.fn().mockResolvedValue({ state: "online" }),
+      onStateChanged: vi.fn(() => vi.fn()),
+    },
   };
 
   return {

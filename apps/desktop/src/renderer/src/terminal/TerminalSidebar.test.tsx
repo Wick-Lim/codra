@@ -108,6 +108,11 @@ function createPaneApi(
       }),
       onChanged: vi.fn(() => vi.fn()),
     },
+    remote: {
+      getState: vi.fn().mockResolvedValue({ state: "idle" }),
+      login: vi.fn().mockResolvedValue({ state: "online" }),
+      onStateChanged: vi.fn(() => vi.fn()),
+    },
   };
 
   return Object.assign(api, {

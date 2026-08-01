@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import { bootstrapDesktop } from "./bootstrap";
 import { registerTerminalIpc } from "./ipc/terminal-ipc";
+import { registerRemoteIpc } from "./ipc/remote-ipc";
 import { DesktopLifecycle } from "./lifecycle";
 import { TerminalManager } from "./terminal/manager";
 import { NodePtyFactory } from "./terminal/node-pty";
@@ -98,6 +99,14 @@ async function startPrimaryInstance(): Promise<void> {
         })
         .catch((error) => console.error("Remote approval failed", error));
     },
+  });
+
+  registerRemoteIpc({
+    ipc: ipcMain,
+    controller: remoteHost,
+    windows: () => BrowserWindow.getAllWindows(),
+    isTrustedRendererUrl: rendererUrlPolicy.isTrusted,
+    reportError: (error) => console.error("Remote IPC error", error),
   });
 
   await bootstrapDesktop({

@@ -9,12 +9,14 @@ import {
 import {
   RemoteDeviceSchema,
   signCanonicalPayload,
+  type RemoteHostStatus,
   type RemoteSession,
 } from "@codra/protocol";
 import { signInWithCustomToken } from "firebase/auth";
 import { loadOrCreateHostIdentity, type HostIdentity } from "./host-identity";
 import { bootstrapRemoteAccount } from "@codra/remote-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/remote-firebase-config";
+import { isRemoteStartRequested, remoteErrorStatus } from "./remote-state";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -32,17 +34,45 @@ export class RemoteHostController {
   private stopRequested = false;
   private unsubscribePending: (() => void) | undefined;
   private readonly promptedSessions = new Set<string>();
+  private status: RemoteHostStatus = { state: "idle" };
+  private readonly statusListeners = new Set<
+    (status: RemoteHostStatus) => void
+  >();
 
   constructor(private readonly options: RemoteHostControllerOptions) {}
 
-  async start(): Promise<void> {
-    if (process.env.CODRA_ENABLE_REMOTE !== "1") return;
+  getStatus(): RemoteHostStatus {
+    return this.status;
+  }
+
+  onStatusChanged(listener: (status: RemoteHostStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  async login(): Promise<RemoteHostStatus> {
+    await this.start(true);
+    return this.status;
+  }
+
+  async start(force = false): Promise<void> {
+    if (
+      !isRemoteStartRequested({
+        force,
+        envValue: process.env.CODRA_ENABLE_REMOTE,
+      })
+    )
+      return;
     if (this.startPromise) return this.startPromise;
     if (this.runtime) return;
     this.stopRequested = false;
+    this.publishStatus({ state: "signing_in" });
     this.startPromise = this.startInternal();
     try {
       await this.startPromise;
+    } catch (error) {
+      this.publishStatus(remoteErrorStatus(error));
+      throw error;
     } finally {
       this.startPromise = undefined;
     }
@@ -57,6 +87,18 @@ export class RemoteHostController {
     this.heartbeatTimer = undefined;
     this.runtime = undefined;
     this.identity = undefined;
+    this.publishStatus({ state: "idle" });
+  }
+
+  private publishStatus(status: RemoteHostStatus): void {
+    this.status = status;
+    for (const listener of this.statusListeners) {
+      try {
+        listener(status);
+      } catch {
+        // Status observers cannot affect the host lifecycle.
+      }
+    }
   }
 
   private async startInternal(): Promise<void> {
@@ -107,6 +149,7 @@ export class RemoteHostController {
         },
         onError: (error) => this.options.reportError(error),
       });
+      this.publishStatus({ state: "online" });
     } catch (error) {
       await this.stop();
       throw error;
