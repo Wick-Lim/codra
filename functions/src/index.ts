@@ -8,14 +8,21 @@ import {
   RemoteDeviceSchema,
   RemoteSessionSchema,
   SignalSchema,
+  buildSessionApprovalSigningPayload,
+  buildSessionRejectionSigningPayload,
+  buildSessionRequestSigningPayload,
+  buildSignalSigningPayload,
   createRfc7638Thumbprint,
   type RemoteDevice,
   type RemoteSession,
+  verifyCanonicalPayload,
 } from "@codra/protocol";
 import { adminAuth, adminDb } from "./runtime";
+export { issueTurnCredentials } from "./turn";
 import {
   DeviceRegistrationInputSchema,
   parseCallableInput,
+  assertActiveDevice,
   requireAccount,
   requireDeviceClaims,
 } from "./auth";
@@ -40,6 +47,14 @@ const approvalInputSchema = z
     approvedScopes: z.array(z.string().min(1).max(80)).max(16),
     hostChallenge: z.string().min(1).max(4096),
     approvalSignature: z.string().min(1),
+  })
+  .strict();
+
+const rejectionInputSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    rejectionReason: z.enum(["USER_REJECTED", "HOST_BUSY", "HOST_DISABLED"]),
+    rejectionSignature: z.string().min(1),
   })
   .strict();
 
@@ -134,6 +149,7 @@ export const heartbeatDevice = onCall(
   { region: FUNCTION_REGION },
   async (request) => {
     const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
     const ref = adminDb.doc(`users/${claims.uid}/devices/${claims.deviceId}`);
     const now = Timestamp.now();
     await adminDb.runTransaction(async (transaction) => {
@@ -162,6 +178,7 @@ export const createRemoteSession = onCall(
   { region: FUNCTION_REGION },
   async (request) => {
     const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
     if (claims.kind !== "browser")
       throw new HttpsError("permission-denied", "BROWSER_DEVICE_REQUIRED");
     const input = parseCallableInput(sessionInputSchema, request.data);
@@ -199,6 +216,21 @@ export const createRemoteSession = onCall(
       expiresAt: input.expiresAt,
       status: "requested",
     });
+    const clientKey = PublicEcJwkSchema.parse(
+      (
+        await adminDb
+          .doc(`users/${claims.uid}/devices/${claims.deviceId}`)
+          .get()
+      ).data()?.publicKeyJwk,
+    );
+    if (
+      !(await verifyCanonicalPayload(
+        clientKey,
+        session.requestSignature,
+        buildSessionRequestSigningPayload(session),
+      ))
+    )
+      throw new HttpsError("permission-denied", "SESSION_SIGNATURE_INVALID");
     const ref = adminDb.doc(
       `users/${claims.uid}/remoteSessions/${session.sessionId}`,
     );
@@ -215,12 +247,17 @@ export const approveRemoteSession = onCall(
   { region: FUNCTION_REGION },
   async (request) => {
     const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
     if (claims.kind !== "host")
       throw new HttpsError("permission-denied", "HOST_DEVICE_REQUIRED");
     const input = parseCallableInput(approvalInputSchema, request.data);
     const ref = adminDb.doc(
       `users/${claims.uid}/remoteSessions/${input.sessionId}`,
     );
+    const hostSnapshot = await adminDb
+      .doc(`users/${claims.uid}/devices/${claims.deviceId}`)
+      .get();
+    const hostKey = PublicEcJwkSchema.parse(hostSnapshot.data()?.publicKeyJwk);
     const now = Timestamp.now();
     let session: RemoteSession | undefined;
     await adminDb.runTransaction(async (transaction) => {
@@ -235,6 +272,8 @@ export const approveRemoteSession = onCall(
         data.hostDeviceGeneration !== claims.generation
       )
         throw new HttpsError("failed-precondition", "SESSION_NOT_ACTIONABLE");
+      if (toMillis(data.expiresAt as Timestamp) <= now.toMillis())
+        throw new HttpsError("failed-precondition", "SESSION_EXPIRED");
       session = RemoteSessionSchema.parse({
         ...data,
         createdAt: toMillis(data.createdAt as Timestamp),
@@ -245,6 +284,31 @@ export const approveRemoteSession = onCall(
         approvalSignature: input.approvalSignature,
         decidedAt: now.toMillis(),
       });
+      const approvalPayload = {
+        domain: "codra.session-approval.v1" as const,
+        protocolVersion: session.protocolVersion,
+        sessionId: session.sessionId,
+        clientDeviceId: session.clientDeviceId,
+        hostDeviceId: session.hostDeviceId,
+        clientKeyThumbprint: session.clientKeyThumbprint,
+        hostKeyThumbprint: session.hostKeyThumbprint,
+        clientDeviceGeneration: session.clientDeviceGeneration,
+        hostDeviceGeneration: session.hostDeviceGeneration,
+        requestedScopes: session.requestedScopes,
+        approvedScopes: input.approvedScopes,
+        clientChallenge: session.clientChallenge,
+        hostChallenge: input.hostChallenge,
+        expiresAtMillis: session.expiresAt,
+        signature: input.approvalSignature,
+      };
+      if (
+        !(await verifyCanonicalPayload(
+          hostKey,
+          input.approvalSignature,
+          buildSessionApprovalSigningPayload(approvalPayload),
+        ))
+      )
+        throw new HttpsError("permission-denied", "APPROVAL_SIGNATURE_INVALID");
       transaction.update(ref, {
         status: "approved",
         approvedScopes: input.approvedScopes,
@@ -258,10 +322,127 @@ export const approveRemoteSession = onCall(
   },
 );
 
+export const listHostDevices = onCall(
+  { region: FUNCTION_REGION },
+  async (request) => {
+    const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
+    if (claims.kind !== "browser")
+      throw new HttpsError("permission-denied", "BROWSER_DEVICE_REQUIRED");
+    const now = Timestamp.now().toMillis();
+    const snapshot = await adminDb
+      .collection(`users/${claims.uid}/devices`)
+      .where("kind", "==", "host")
+      .where("active", "==", true)
+      .where("remoteAccessEnabled", "==", true)
+      .limit(32)
+      .get();
+    return {
+      devices: snapshot.docs
+        .map((item) => item.data())
+        .filter((item) => toMillis(item.expiresAt as Timestamp) > now)
+        .map((item) =>
+          deviceForClient(
+            RemoteDeviceSchema.parse({
+              ...item,
+              createdAt: toMillis(item.createdAt as Timestamp),
+              lastSeenAt: toMillis(item.lastSeenAt as Timestamp),
+              expiresAt: toMillis(item.expiresAt as Timestamp),
+            }),
+          ),
+        ),
+    };
+  },
+);
+
+export const rejectRemoteSession = onCall(
+  { region: FUNCTION_REGION },
+  async (request) => {
+    const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
+    if (claims.kind !== "host")
+      throw new HttpsError("permission-denied", "HOST_DEVICE_REQUIRED");
+    const input = parseCallableInput(rejectionInputSchema, request.data);
+    const ref = adminDb.doc(
+      `users/${claims.uid}/remoteSessions/${input.sessionId}`,
+    );
+    const hostSnapshot = await adminDb
+      .doc(`users/${claims.uid}/devices/${claims.deviceId}`)
+      .get();
+    const hostKey = PublicEcJwkSchema.parse(hostSnapshot.data()?.publicKeyJwk);
+    const now = Timestamp.now();
+    let session: RemoteSession | undefined;
+    await adminDb.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists)
+        throw new HttpsError("not-found", "SESSION_NOT_FOUND");
+      const data = snapshot.data() ?? {};
+      if (
+        data.status !== "requested" ||
+        data.hostDeviceId !== claims.deviceId ||
+        data.hostKeyThumbprint !== claims.keyThumbprint ||
+        data.hostDeviceGeneration !== claims.generation
+      )
+        throw new HttpsError("failed-precondition", "SESSION_NOT_ACTIONABLE");
+      if (toMillis(data.expiresAt as Timestamp) <= now.toMillis())
+        throw new HttpsError("failed-precondition", "SESSION_EXPIRED");
+      const candidate = RemoteSessionSchema.parse({
+        ...data,
+        createdAt: toMillis(data.createdAt as Timestamp),
+        expiresAt: toMillis(data.expiresAt as Timestamp),
+        status: "rejected",
+        approvedScopes: [],
+        rejectionReason: input.rejectionReason,
+        rejectionSignature: input.rejectionSignature,
+        decidedAt: now.toMillis(),
+      });
+      const rejectionPayload = {
+        domain: "codra.session-rejection.v1" as const,
+        protocolVersion: candidate.protocolVersion,
+        sessionId: candidate.sessionId,
+        ownerUid: candidate.ownerUid,
+        clientDeviceId: candidate.clientDeviceId,
+        hostDeviceId: candidate.hostDeviceId,
+        clientKeyThumbprint: candidate.clientKeyThumbprint,
+        hostKeyThumbprint: candidate.hostKeyThumbprint,
+        clientDeviceGeneration: candidate.clientDeviceGeneration,
+        hostDeviceGeneration: candidate.hostDeviceGeneration,
+        requestedScopes: candidate.requestedScopes,
+        clientChallenge: candidate.clientChallenge,
+        rejectionReason: input.rejectionReason,
+        expiresAtMillis: candidate.expiresAt,
+        signature: input.rejectionSignature,
+      };
+      if (
+        !(await verifyCanonicalPayload(
+          hostKey,
+          input.rejectionSignature,
+          buildSessionRejectionSigningPayload(rejectionPayload),
+        ))
+      )
+        throw new HttpsError(
+          "permission-denied",
+          "REJECTION_SIGNATURE_INVALID",
+        );
+      session = candidate;
+      transaction.update(ref, {
+        status: "rejected",
+        approvedScopes: [],
+        rejectionReason: input.rejectionReason,
+        rejectionSignature: input.rejectionSignature,
+        decidedAt: now,
+        updatedAt: now,
+      });
+    });
+    return session;
+  },
+);
+
 export const publishSignal = onCall(
   { region: FUNCTION_REGION },
   async (request) => {
     const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
     const input = parseCallableInput(signalInputSchema, request.data);
     if (
       input.signal.senderDeviceId !== claims.deviceId ||
@@ -281,6 +462,18 @@ export const publishSignal = onCall(
     )
       throw new HttpsError("permission-denied", "SESSION_PARTICIPANT_REQUIRED");
     const now = Timestamp.now();
+    const isClient = data.clientDeviceId === claims.deviceId;
+    if (
+      (isClient && input.signal.recipientDeviceId !== data.hostDeviceId) ||
+      (!isClient && input.signal.recipientDeviceId !== data.clientDeviceId) ||
+      !["approved", "signaling", "connected"].includes(String(data.status)) ||
+      toMillis(data.expiresAt as Timestamp) <= now.toMillis()
+    )
+      throw new HttpsError("failed-precondition", "SESSION_NOT_SIGNALABLE");
+    const sender = await adminDb
+      .doc(`users/${claims.uid}/devices/${claims.deviceId}`)
+      .get();
+    const senderKey = PublicEcJwkSchema.parse(sender.data()?.publicKeyJwk);
     const signal = SignalSchema.parse({
       ...input.signal,
       createdAt: now.toMillis(),
@@ -289,6 +482,14 @@ export const publishSignal = onCall(
         now.toMillis() + 60 * 60 * 1000,
       ),
     });
+    if (
+      !(await verifyCanonicalPayload(
+        senderKey,
+        signal.signature,
+        buildSignalSigningPayload(signal),
+      ))
+    )
+      throw new HttpsError("permission-denied", "SIGNAL_SIGNATURE_INVALID");
     const ref = adminDb.doc(
       `users/${claims.uid}/remoteSessions/${signal.sessionId}/signals/${signal.negotiationId}-${signal.senderDeviceId}-${signal.sequence}`,
     );

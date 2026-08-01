@@ -47,6 +47,8 @@ export interface DesktopBootstrapOptions {
   registerIpc(options: RegisterTerminalIpcOptions): () => void;
   createLifecycle(options: DesktopLifecycleOptions): DesktopLifecycleInstance;
   createWindow(): void | Promise<void>;
+  startRemoteHost?(): void | Promise<void>;
+  stopRemoteHost?(): void | Promise<void>;
   confirmQuit(
     activeTerminals: readonly import("@codra/protocol").TerminalDescriptor[],
   ): Promise<boolean>;
@@ -71,6 +73,7 @@ export async function bootstrapDesktop(
   let repository: DesktopBootstrapRepository | undefined;
   let manager: DesktopBootstrapManager | undefined;
   let unregisterIpc: (() => void) | undefined;
+  let remoteHostStarted = false;
 
   try {
     repository = options.createRepository(
@@ -103,14 +106,24 @@ export async function bootstrapDesktop(
       createWindow: options.createWindow,
       confirmQuit: options.confirmQuit,
       closeDatabase: () => repository?.close(),
+      closeRemoteHost: options.stopRemoteHost,
       unregisterIpc,
       admission,
       reportError: options.reportError,
     });
     lifecycle.start();
     await options.createWindow();
+    if (options.startRemoteHost) {
+      remoteHostStarted = true;
+      void Promise.resolve(options.startRemoteHost()).catch(
+        options.reportError,
+      );
+    }
   } catch (error) {
     options.reportError(error);
+    if (remoteHostStarted && options.stopRemoteHost) {
+      await runCleanup(options.stopRemoteHost, options.reportError);
+    }
     if (unregisterIpc) {
       await runCleanup(unregisterIpc, options.reportError);
     }

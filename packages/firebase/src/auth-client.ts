@@ -6,6 +6,14 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { httpsCallable, type Functions } from "firebase/functions";
+import {
+  RemoteDeviceSchema,
+  RemoteSessionSchema,
+  TurnCredentialResponseSchema,
+  type RemoteDevice,
+  type RemoteSession,
+  type TurnCredentialResponse,
+} from "@codra/protocol";
 
 export async function signInWithGoogle(auth: Auth): Promise<UserCredential> {
   return signInWithPopup(auth, new GoogleAuthProvider());
@@ -47,4 +55,88 @@ export async function registerDevice(
   );
   const result = await callable(request);
   return result.data;
+}
+
+export async function listHostDevices(
+  functions: Functions,
+): Promise<RemoteDevice[]> {
+  const callable = httpsCallable<Record<string, never>, { devices: unknown[] }>(
+    functions,
+    "listHostDevices",
+  );
+  const result = await callable({});
+  return result.data.devices.map((device) => RemoteDeviceSchema.parse(device));
+}
+
+export interface CreateRemoteSessionRequest {
+  sessionId: string;
+  hostDeviceId: string;
+  hostKeyThumbprint: string;
+  hostDeviceGeneration: number;
+  protocolVersion: 1;
+  requestedScopes: string[];
+  clientChallenge: string;
+  requestSignature: string;
+  expiresAt: number;
+}
+
+export async function createRemoteSession(
+  functions: Functions,
+  request: CreateRemoteSessionRequest,
+): Promise<RemoteSession> {
+  const callable = httpsCallable<CreateRemoteSessionRequest, unknown>(
+    functions,
+    "createRemoteSession",
+  );
+  const result = await callable(request);
+  return RemoteSessionSchema.parse(result.data);
+}
+
+export interface ApproveRemoteSessionRequest {
+  sessionId: string;
+  approvedScopes: string[];
+  hostChallenge: string;
+  approvalSignature: string;
+}
+
+export async function approveRemoteSession(
+  functions: Functions,
+  request: ApproveRemoteSessionRequest,
+): Promise<RemoteSession> {
+  const callable = httpsCallable<ApproveRemoteSessionRequest, unknown>(
+    functions,
+    "approveRemoteSession",
+  );
+  const result = await callable(request);
+  return RemoteSessionSchema.parse(result.data);
+}
+
+export interface RejectRemoteSessionRequest {
+  sessionId: string;
+  rejectionReason: "USER_REJECTED" | "HOST_BUSY" | "HOST_DISABLED";
+  rejectionSignature: string;
+}
+
+export async function rejectRemoteSession(
+  functions: Functions,
+  request: RejectRemoteSessionRequest,
+): Promise<RemoteSession> {
+  const callable = httpsCallable<RejectRemoteSessionRequest, unknown>(
+    functions,
+    "rejectRemoteSession",
+  );
+  const result = await callable(request);
+  return RemoteSessionSchema.parse(result.data);
+}
+
+export async function issueTurnCredentials(
+  functions: Functions,
+  sessionId: string,
+): Promise<TurnCredentialResponse> {
+  const callable = httpsCallable<{ sessionId: string }, unknown>(
+    functions,
+    "issueTurnCredentials",
+  );
+  const result = await callable({ sessionId });
+  return TurnCredentialResponseSchema.parse(result.data);
 }

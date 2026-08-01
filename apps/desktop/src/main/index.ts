@@ -14,6 +14,8 @@ import {
 } from "./renderer-security";
 import { startSingleInstanceApplication } from "./single-instance";
 import { buildBrowserWindowOptions } from "./window-options";
+import { RemoteHostController } from "./remote/host-controller";
+import type { RemoteSession } from "@codra/protocol";
 
 let mainWindow: BrowserWindow | undefined;
 let rendererUrlPolicy: RendererUrlPolicy | undefined;
@@ -76,6 +78,28 @@ async function startPrimaryInstance(): Promise<void> {
     devServerUrl: process.env.ELECTRON_RENDERER_URL,
   });
 
+  const remoteHost = new RemoteHostController({
+    userDataPath: app.getPath("userData"),
+    reportError: (error) => console.error("Remote host error", error),
+    onPendingSession: (session: RemoteSession) => {
+      void dialog
+        .showMessageBox({
+          type: "question",
+          buttons: ["거부", "승인"],
+          defaultId: 0,
+          cancelId: 0,
+          title: "CODRA 원격 연결 요청",
+          message: "새 원격 터미널 연결을 승인할까요?",
+          detail: `요청 장치 ${session.clientDeviceId.slice(0, 8)}…\n권한: ${session.requestedScopes.join(", ")}`,
+        })
+        .then((result) => {
+          if (result.response === 1) return remoteHost.approveSession(session);
+          return remoteHost.rejectSession(session);
+        })
+        .catch((error) => console.error("Remote approval failed", error));
+    },
+  });
+
   await bootstrapDesktop({
     app,
     userDataPath: app.getPath("userData"),
@@ -93,6 +117,8 @@ async function startPrimaryInstance(): Promise<void> {
     registerIpc: registerTerminalIpc,
     createLifecycle: (options) => new DesktopLifecycle(options),
     createWindow,
+    startRemoteHost: () => remoteHost.start(),
+    stopRemoteHost: () => remoteHost.stop(),
     confirmQuit: (activeTerminals) =>
       confirmQuitWithActiveTerminals(activeTerminals.length),
     reportError: (error) => console.error("Desktop lifecycle error", error),

@@ -22,6 +22,7 @@ export interface DesktopLifecycleOptions {
   createWindow(): void | Promise<void>;
   confirmQuit(activeTerminals: readonly TerminalDescriptor[]): Promise<boolean>;
   closeDatabase(): void | Promise<void>;
+  closeRemoteHost?(): void | Promise<void>;
   unregisterIpc(): void | Promise<void>;
   admission: TerminalRequestAdmission;
   reportError?(error: unknown): void;
@@ -79,6 +80,7 @@ export class DesktopLifecycle {
       await this.options.admission.drain();
       await this.options.manager.closeAll();
       closeAllSucceeded = true;
+      await this.options.closeRemoteHost?.();
       await this.options.closeDatabase();
       await this.options.unregisterIpc();
       this.quitting = true;

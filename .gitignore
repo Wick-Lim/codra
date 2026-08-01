@@ -18,5 +18,6 @@ apps/desktop/dist-remote-test/
 apps/desktop/remote-test-provenance.json
 .pnpm-store/
 apps/web/dist/
+apps/web/dist-remote-test/
 functions/dist/
 packages/*/dist/

@@ -1,5 +1,6 @@
 import { HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { z } from "zod";
+import { adminDb } from "./runtime";
 
 export const DeviceRegistrationInputSchema = z
   .object({
@@ -41,13 +42,17 @@ export function parseCallableInput<T>(schema: z.ZodType<T>, data: unknown): T {
   return parsed.data;
 }
 
-export function requireDeviceClaims(request: CallableRequest<unknown>): {
+export interface DeviceClaims {
   uid: string;
   deviceId: string;
   keyThumbprint: string;
   kind: "host" | "browser";
   generation: number;
-} {
+}
+
+export function requireDeviceClaims(
+  request: CallableRequest<unknown>,
+): DeviceClaims {
   if (!request.auth?.uid)
     throw new HttpsError("unauthenticated", "AUTH_REQUIRED");
   const token = request.auth.token;
@@ -74,4 +79,22 @@ export function requireDeviceClaims(request: CallableRequest<unknown>): {
     kind,
     generation,
   };
+}
+
+export async function assertActiveDevice(claims: DeviceClaims): Promise<void> {
+  const snapshot = await adminDb
+    .doc(`users/${claims.uid}/devices/${claims.deviceId}`)
+    .get();
+  const data = snapshot.data();
+  if (
+    !snapshot.exists ||
+    data?.ownerUid !== claims.uid ||
+    data.deviceId !== claims.deviceId ||
+    data.keyThumbprint !== claims.keyThumbprint ||
+    data.kind !== claims.kind ||
+    data.generation !== claims.generation ||
+    data.active !== true
+  ) {
+    throw new HttpsError("permission-denied", "DEVICE_REVOKED");
+  }
 }
