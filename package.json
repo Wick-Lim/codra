@@ -13,6 +13,7 @@
     "test": "pnpm -r --if-present test",
     "test:e2e": "pnpm build && playwright test --project=dev-electron",
     "test:packaged": "playwright test --project=packaged-electron",
+    "package:archive": "node scripts/archive-host-app.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format:check": "prettier --check ."

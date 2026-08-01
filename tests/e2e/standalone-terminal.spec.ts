@@ -3,35 +3,34 @@ import { _electron as electron } from "playwright";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import {
+  processExists,
+  rememberDescendants,
+  terminateCapturedProcessTree,
+} from "./process-cleanup";
 
 const desktopMainEntry = path.resolve("apps/desktop/out/main/index.js");
 const completedMarker = "__CODRA_E2E_COMPLETE__";
 
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
-test("creates a real terminal and restores its identity and scrollback after window close", async () => {
+test("restores an active terminal and quits it through the confirmed warning", async () => {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "codra-dev-e2e-"));
-  const electronApp = await electron.launch({
-    args: [desktopMainEntry],
-    env: {
-      ...process.env,
-      CODRA_USER_DATA_DIR: userDataDir,
-    },
-  });
-  const electronProcess = electronApp.process();
-  const electronPid = electronProcess.pid!;
+  let electronApp: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  let electronPid: number | undefined;
   let shellPid: number | undefined;
+  const knownDescendantPids = new Set<number>();
 
   try {
+    electronApp = await electron.launch({
+      args: [desktopMainEntry],
+      env: {
+        ...process.env,
+        CODRA_USER_DATA_DIR: userDataDir,
+      },
+    });
+    electronPid = electronApp.process().pid!;
     let page = await electronApp.firstWindow();
     await page.getByRole("button", { name: "New terminal" }).click();
+    await rememberDescendants(electronPid, knownDescendantPids);
     const activeTerminal = page.getByTestId("active-terminal");
     await expect(activeTerminal).toBeVisible();
     const terminalId = await activeTerminal.getAttribute("data-terminal-id");
@@ -69,6 +68,7 @@ test("creates a real terminal and restores its identity and scrollback after win
     );
     expect(pidMatch).not.toBeNull();
     shellPid = Number(pidMatch![1]);
+    knownDescendantPids.add(shellPid);
     expect(processExists(shellPid)).toBe(true);
 
     await page.close();
@@ -98,17 +98,34 @@ test("creates a real terminal and restores its identity and scrollback after win
       completedMarker,
     );
 
-    await page.evaluate(async ({ id }) => window.codra.terminal.close(id), {
-      id: terminalId!,
+    await electronApp.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async (options) => {
+        if (
+          options.type !== "warning" ||
+          options.buttons?.join("|") !== "Cancel|Quit" ||
+          options.defaultId !== 0 ||
+          options.cancelId !== 0 ||
+          options.title !== "Quit Codra?" ||
+          options.message !== "Close 1 active terminal?" ||
+          options.detail !== "Their running processes will be terminated."
+        ) {
+          throw new Error("Unexpected active-terminal quit warning");
+        }
+        return { response: 1, checkboxChecked: false };
+      };
     });
+    await electronApp.evaluate(({ app }) => app.quit());
     await expect.poll(() => processExists(shellPid!)).toBe(false);
-    await electronApp.close();
-    await expect.poll(() => processExists(electronPid)).toBe(false);
+    await expect.poll(() => processExists(electronPid!)).toBe(false);
   } finally {
-    if (processExists(electronPid)) electronProcess.kill("SIGKILL");
-    if (shellPid !== undefined && processExists(shellPid)) {
-      process.kill(shellPid, "SIGKILL");
+    try {
+      await terminateCapturedProcessTree({
+        rootPid: electronPid,
+        knownDescendantPids,
+        knownShellPid: shellPid,
+      });
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
     }
-    await rm(userDataDir, { recursive: true, force: true });
   }
 });

@@ -37,7 +37,9 @@ pnpm --filter @codra/desktop package:dir
 pnpm test:packaged
 ```
 
-`package:dir` creates an unsigned, unpacked `CODRA.app` for the host architecture under `apps/desktop/dist/`. The release command below declares DMG and ZIP targets for both Apple Silicon and Intel Macs:
+`package:dir` removes any previous host output, writes current-build provenance, and creates an unsigned, unpacked `CODRA.app` for the host architecture under `apps/desktop/dist/`. CI runs the packaged smoke test and then uploads `CODRA-host.app.tar.gz`; the archive step extracts it again and verifies that the app executable and PTY helper retain mode `0755`.
+
+The release command below declares DMG and ZIP targets for both Apple Silicon and Intel Macs:
 
 ```bash
 pnpm --filter @codra/desktop package:mac

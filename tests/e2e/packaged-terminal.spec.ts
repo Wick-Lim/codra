@@ -1,79 +1,129 @@
+import { execFile } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
-import { access, mkdtemp, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+import {
+  processExists,
+  rememberDescendants,
+  terminateCapturedProcessTree,
+} from "./process-cleanup";
 
+const execFileAsync = promisify(execFile);
 const desktopDist = path.resolve("apps/desktop/dist");
 const completedMarker = "__CODRA_PACKAGED_SMOKE__";
 
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
+interface PackageProvenance {
+  id: string;
+  commit: string;
+  arch: string;
+  createdAt: string;
 }
 
-async function findPackagedExecutable(): Promise<string> {
-  const entries = await readdir(desktopDist, { withFileTypes: true }).catch(
-    () => [],
-  );
-  const macDirectories = entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("mac"))
-    .map((entry) => entry.name)
-    .sort();
-  const preferredDirectory = process.arch === "arm64" ? "mac-arm64" : "mac";
-  const orderedDirectories = [
-    preferredDirectory,
-    ...macDirectories.filter((name) => name !== preferredDirectory),
-  ];
-
-  for (const directory of orderedDirectories) {
-    const executable = path.join(
-      desktopDist,
-      directory,
-      "CODRA.app",
-      "Contents",
-      "MacOS",
-      "CODRA",
+function hostPackagingPaths() {
+  if (process.arch !== "arm64" && process.arch !== "x64") {
+    throw new Error(
+      `Unsupported macOS packaging architecture: ${process.arch}`,
     );
-    try {
-      await access(executable, constants.X_OK);
-      return executable;
-    } catch {
-      // Keep looking for a host-architecture unpacked application.
-    }
   }
-  throw new Error(
-    `No executable CODRA.app found below ${desktopDist}; run package:dir first`,
-  );
+  const outputDirectory = process.arch === "arm64" ? "mac-arm64" : "mac";
+  const appPath = path.join(desktopDist, outputDirectory, "CODRA.app");
+  const resourcesPath = path.join(appPath, "Contents", "Resources");
+  return {
+    appPath,
+    executablePath: path.join(appPath, "Contents", "MacOS", "CODRA"),
+    externalProvenancePath: path.join(desktopDist, "package-provenance.json"),
+    packagedProvenancePath: path.join(resourcesPath, "package-provenance.json"),
+    selectedHelperPath: path.join(
+      resourcesPath,
+      "app.asar.unpacked",
+      "node_modules",
+      "node-pty",
+      "build",
+      "Release",
+      "spawn-helper",
+    ),
+    nativeBindingPath: path.join(
+      resourcesPath,
+      "app.asar.unpacked",
+      "node_modules",
+      "better-sqlite3",
+      "prebuilds",
+      `darwin-${process.arch}.node`,
+    ),
+  };
 }
 
-test("packaged CODRA launches a real shell and reaps it on terminal close", async () => {
+async function readProvenance(filePath: string): Promise<PackageProvenance> {
+  return JSON.parse(await readFile(filePath, "utf8")) as PackageProvenance;
+}
+
+async function fileDescription(filePath: string): Promise<string> {
+  const { stdout } = await execFileAsync("file", [filePath]);
+  return stdout;
+}
+
+test("packaged CODRA proves current host natives and reaps its real shell", async () => {
   test.skip(process.platform !== "darwin", "macOS packaged smoke test");
 
-  const executablePath = await findPackagedExecutable();
+  const paths = hostPackagingPaths();
   const userDataDir = await mkdtemp(
     path.join(tmpdir(), "codra-packaged-smoke-"),
   );
-  const electronApp = await electron.launch({
-    executablePath,
-    env: {
-      ...process.env,
-      CODRA_PACKAGED_SMOKE: "1",
-      CODRA_USER_DATA_DIR: userDataDir,
-    },
-  });
-  const electronProcess = electronApp.process();
-  const electronPid = electronProcess.pid!;
+  let electronApp: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  let electronPid: number | undefined;
   let shellPid: number | undefined;
+  const knownDescendantPids = new Set<number>();
 
   try {
+    await access(paths.executablePath, constants.X_OK);
+    const externalProvenance = await readProvenance(
+      paths.externalProvenancePath,
+    );
+    const packagedProvenance = await readProvenance(
+      paths.packagedProvenancePath,
+    );
+    expect(packagedProvenance).toEqual(externalProvenance);
+    expect(externalProvenance.arch).toBe(process.arch);
+    expect(externalProvenance.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    const { stdout: currentCommit } = await execFileAsync("git", [
+      "rev-parse",
+      "HEAD",
+    ]);
+    expect(externalProvenance.commit).toBe(currentCommit.trim());
+
+    const expectedMachArch = process.arch === "arm64" ? "arm64" : "x86_64";
+    await expect(fileDescription(paths.executablePath)).resolves.toContain(
+      `Mach-O 64-bit executable ${expectedMachArch}`,
+    );
+    expect(paths.selectedHelperPath).toContain(
+      `${path.sep}app.asar.unpacked${path.sep}`,
+    );
+    expect((await stat(paths.selectedHelperPath)).mode & 0o777).toBe(0o755);
+    expect(paths.nativeBindingPath).toContain(
+      `${path.sep}app.asar.unpacked${path.sep}`,
+    );
+    await expect(fileDescription(paths.nativeBindingPath)).resolves.toContain(
+      `Mach-O 64-bit bundle ${expectedMachArch}`,
+    );
+
+    electronApp = await electron.launch({
+      executablePath: paths.executablePath,
+      env: {
+        ...process.env,
+        CODRA_PACKAGED_SMOKE: "1",
+        CODRA_USER_DATA_DIR: userDataDir,
+      },
+    });
+    electronPid = electronApp.process().pid!;
     const page = await electronApp.firstWindow();
     await page.getByRole("button", { name: "New terminal" }).click();
+    await rememberDescendants(electronPid, knownDescendantPids);
     const activeTerminal = page.getByTestId("active-terminal");
     await expect(activeTerminal).toBeVisible();
     const terminalId = await activeTerminal.getAttribute("data-terminal-id");
@@ -109,6 +159,7 @@ test("packaged CODRA launches a real shell and reaps it on terminal close", asyn
     const pidMatch = replayText.match(new RegExp(`${completedMarker}:(\\d+)`));
     expect(pidMatch).not.toBeNull();
     shellPid = Number(pidMatch![1]);
+    knownDescendantPids.add(shellPid);
     expect(processExists(shellPid)).toBe(true);
 
     await page.evaluate(async ({ id }) => window.codra.terminal.close(id), {
@@ -116,12 +167,16 @@ test("packaged CODRA launches a real shell and reaps it on terminal close", asyn
     });
     await expect.poll(() => processExists(shellPid!)).toBe(false);
     await electronApp.close();
-    await expect.poll(() => processExists(electronPid)).toBe(false);
+    await expect.poll(() => processExists(electronPid!)).toBe(false);
   } finally {
-    if (processExists(electronPid)) electronProcess.kill("SIGKILL");
-    if (shellPid !== undefined && processExists(shellPid)) {
-      process.kill(shellPid, "SIGKILL");
+    try {
+      await terminateCapturedProcessTree({
+        rootPid: electronPid,
+        knownDescendantPids,
+        knownShellPid: shellPid,
+      });
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
     }
-    await rm(userDataDir, { recursive: true, force: true });
   }
 });

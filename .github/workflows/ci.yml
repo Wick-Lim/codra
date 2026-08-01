@@ -54,9 +54,12 @@ jobs:
       - name: Run packaged executable smoke
         run: pnpm test:packaged
 
-      - name: Upload unpacked app
+      - name: Archive app and verify executable modes
+        run: pnpm package:archive
+
+      - name: Upload archived app
         uses: actions/upload-artifact@v4
         with:
-          name: CODRA-macos-unpacked
-          path: apps/desktop/dist/mac*/CODRA.app
+          name: CODRA-macos-app
+          path: apps/desktop/dist/CODRA-host.app.tar.gz
           if-no-files-found: error

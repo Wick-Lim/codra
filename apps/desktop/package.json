@@ -8,8 +8,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "package:dir": "pnpm build && electron-builder --dir --mac --publish never",
-    "package:mac": "pnpm build && electron-builder --mac --publish never",
+    "package:dir": "node ../../scripts/package-macos.mjs",
+    "package:mac": "node ../../scripts/package-macos.mjs --release",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
