@@ -278,6 +278,34 @@ describe("desktop login transaction Functions", () => {
     ).rejects.toThrow("GOOGLE_ACCOUNT_REQUIRED");
   });
 
+  it("requires a recent Google authentication timestamp", async () => {
+    await expect(
+      authorizeDesktopLogin.run({
+        data: {},
+        auth: {
+          uid: ownerUid,
+          token: {
+            firebase: { sign_in_provider: "google.com" },
+            auth_time: Math.floor((Date.now() - 6 * 60 * 1000) / 1000),
+          },
+        },
+      } as never),
+    ).rejects.toThrow("RECENT_GOOGLE_AUTH_REQUIRED");
+  });
+
+  it("rejects a start binding signed by the wrong device key", async () => {
+    const identity = await p256Identity();
+    const otherIdentity = await p256Identity();
+    const prepared = await startInput({ identity });
+    prepared.request.startSignature = await signCanonicalPayload(
+      otherIdentity.privateKey,
+      buildDesktopLoginStartSigningPayload(prepared.request),
+    );
+    const res = response();
+    await desktopLoginStart(rawRequest(prepared.request) as never, res as never);
+    expect(res.body).toEqual({ error: "START_SIGNATURE_INVALID" });
+  });
+
   it("inspects and authorizes one matching Google transaction exactly once", async () => {
     const identity = await p256Identity();
     const started = await startAttempt({ identity });
@@ -357,6 +385,35 @@ describe("desktop login transaction Functions", () => {
     expect(replay.body).toEqual({ error: "LOGIN_CONSUMED" });
   });
 
+  it("rejects a redeem signed by the wrong device key", async () => {
+    const identity = await p256Identity();
+    const otherIdentity = await p256Identity();
+    const started = await startAttempt({ identity });
+    const code = await authorize(attemptId, started.state);
+    const stored = fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`)!;
+    const request = {
+      attemptId,
+      code,
+      state: started.state,
+      nonce: started.nonce,
+      pkceVerifier: started.verifier,
+      deviceSignature: await signCanonicalPayload(
+        otherIdentity.privateKey,
+        buildDesktopLoginRedeemSigningPayload({
+          attemptId,
+          code,
+          state: started.state,
+          nonce: started.nonce,
+          deviceId: stored.deviceId as string,
+          keyThumbprint: stored.keyThumbprint as string,
+        }),
+      ),
+    };
+    const res = response();
+    await desktopLoginRedeem(rawRequest(request) as never, res as never);
+    expect(res.body).toEqual({ error: "REDEEM_SIGNATURE_INVALID" });
+  });
+
   it("resumes only the matching active host key", async () => {
     const identity = await p256Identity();
     const first = await startAttempt({ identity });
@@ -399,6 +456,26 @@ describe("desktop login transaction Functions", () => {
       identity: otherIdentity,
     });
     expect(mismatch.body).toEqual({ error: "DEVICE_KEY_MISMATCH" });
+
+    const devicePath = `users/${ownerUid}/devices/${deviceId}`;
+    const existing = fake.documents.get(devicePath)!;
+    fake.documents.set(devicePath, { ...existing, active: false });
+    const disabledAttempt = "eab679d5-d301-4706-92b8-67c0a935b70b";
+    const disabled = await startAttempt({
+      identity,
+      action: "resume",
+      attempt: disabledAttempt,
+    });
+    const disabledCode = await authorize(disabledAttempt, disabled.state);
+    const disabledResult = await redeem({
+      attempt: disabledAttempt,
+      code: disabledCode,
+      state: disabled.state,
+      nonce: disabled.nonce,
+      verifier: disabled.verifier,
+      identity,
+    });
+    expect(disabledResult.body).toEqual({ error: "DEVICE_DISABLED" });
   });
 
   it("cancels only the matching transaction and makes the matching retry idempotent", async () => {
@@ -422,5 +499,32 @@ describe("desktop login transaction Functions", () => {
       wrongState as never,
     );
     expect(wrongState.body).toEqual({ error: "LOGIN_STATE_INVALID" });
+
+    const secondIdentity = await p256Identity();
+    const consumed = await startAttempt({
+      identity: secondIdentity,
+      attempt: "f93c0b57-f71d-4bdb-9764-9477fe12a0e4",
+    });
+    const consumedCode = await authorize(
+      consumed.request.attemptId,
+      consumed.state,
+    );
+    await redeem({
+      attempt: consumed.request.attemptId,
+      code: consumedCode,
+      state: consumed.state,
+      nonce: consumed.nonce,
+      verifier: consumed.verifier,
+      identity: secondIdentity,
+    });
+    const consumedCancel = response();
+    await desktopLoginCancel(
+      rawRequest({
+        attemptId: consumed.request.attemptId,
+        state: consumed.state,
+      }) as never,
+      consumedCancel as never,
+    );
+    expect(consumedCancel.body).toEqual({ error: "LOGIN_NOT_CANCELLABLE" });
   });
 });
