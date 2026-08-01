@@ -284,6 +284,27 @@ describe("desktop login transaction Functions", () => {
         data: {},
         auth: {
           uid: ownerUid,
+          token: { firebase: { sign_in_provider: "google.com" } },
+        },
+      } as never),
+    ).rejects.toThrow("RECENT_GOOGLE_AUTH_REQUIRED");
+    await expect(
+      authorizeDesktopLogin.run({
+        data: {},
+        auth: {
+          uid: ownerUid,
+          token: {
+            firebase: { sign_in_provider: "google.com" },
+            auth_time: "not-a-number",
+          },
+        },
+      } as never),
+    ).rejects.toThrow("RECENT_GOOGLE_AUTH_REQUIRED");
+    await expect(
+      authorizeDesktopLogin.run({
+        data: {},
+        auth: {
+          uid: ownerUid,
           token: {
             firebase: { sign_in_provider: "google.com" },
             auth_time: Math.floor((Date.now() - 6 * 60 * 1000) / 1000),
