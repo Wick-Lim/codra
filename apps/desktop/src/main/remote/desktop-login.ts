@@ -51,6 +51,7 @@ export interface DesktopLoginCallback {
   attemptId: string;
   code: string;
   state: string;
+  postBody: string;
 }
 
 export interface DesktopLoginGoogleAuthUriRequest {
@@ -162,7 +163,12 @@ export function parseDesktopLoginCallback(
   ) {
     return undefined;
   }
-  return { attemptId: expected.attemptId, code, state };
+  return {
+    attemptId: expected.attemptId,
+    code,
+    state,
+    postBody: url.search.slice(1),
+  };
 }
 
 function sendLoopbackError(response: ServerResponse, status: number): void {
@@ -315,8 +321,10 @@ export function createDesktopLoginGoogleAuthExchangeRequest(
   sessionId: string,
   code: string,
   state: string,
+  callbackPostBody?: string,
 ): DesktopLoginGoogleAuthExchangeRequest {
-  const postBody = new URLSearchParams({ code, state }).toString();
+  const postBody =
+    callbackPostBody ?? new URLSearchParams({ code, state }).toString();
   return {
     requestUri,
     postBody,
@@ -374,6 +382,7 @@ async function completeDesktopLoginGoogleAuth(
   sessionId: string,
   code: string,
   state: string,
+  callbackPostBody: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const url = new URL("/v1/accounts:signInWithIdp", IDENTITY_TOOLKIT_ORIGIN);
@@ -388,6 +397,7 @@ async function completeDesktopLoginGoogleAuth(
       sessionId,
       code,
       state,
+      callbackPostBody,
     ),
     signal,
   );
@@ -562,6 +572,7 @@ export async function bootstrapProductionDesktopLogin(
         state,
         callback.code,
         callback.state,
+        callback.postBody,
         abort.signal,
       ),
     );

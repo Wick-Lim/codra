@@ -136,6 +136,21 @@ describe("desktop login loopback", () => {
     });
   });
 
+  it("preserves the complete Google callback body for Identity Toolkit", () => {
+    expect(
+      createDesktopLoginGoogleAuthExchangeRequest(
+        "http://127.0.0.1:45831/auth/callback",
+        state,
+        code,
+        "opaque-google-state",
+        "code=google-code&state=opaque-google-state&iss=https%3A%2F%2Faccounts.google.com",
+      ),
+    ).toMatchObject({
+      postBody:
+        "code=google-code&state=opaque-google-state&iss=https%3A%2F%2Faccounts.google.com",
+    });
+  });
+
   it("constructs fixed production and deployment-derived emulator Function URLs", () => {
     expect(
       desktopLoginFunctionUrl(productionRuntime(), "desktopLoginStart"),
@@ -171,6 +186,7 @@ describe("desktop login loopback", () => {
       attemptId,
       code,
       state,
+      postBody: valid.url.slice(valid.url.indexOf("?") + 1),
     });
     expect(
       parseDesktopLoginCallback(
@@ -229,7 +245,12 @@ describe("desktop login loopback", () => {
         },
         { port: 45831, attemptId, state },
       ),
-    ).toEqual({ attemptId, code, state });
+    ).toEqual({
+      attemptId,
+      code,
+      state,
+      postBody: `code=${code}&state=${state}`,
+    });
   });
 
   it("keeps invalid traffic from consuming the attempt and accepts the first valid callback", async () => {
@@ -250,6 +271,7 @@ describe("desktop login loopback", () => {
       attemptId,
       code,
       state,
+      postBody: `code=${code}&state=${state}`,
     });
     expect(await valid).toBe(200);
     await listener.close();
