@@ -38,7 +38,7 @@ export const DESKTOP_LOGIN_PUBLIC_EXPORTS = [
 
 type TransactionStatus = "pending" | "authorized" | "consumed" | "cancelled";
 
-interface DesktopLoginTransaction {
+export interface DesktopLoginTransaction {
   attemptId: string;
   action: DesktopLoginAction;
   deviceId: string;
@@ -60,6 +60,13 @@ interface DesktopLoginTransaction {
   authorizedAt?: Timestamp;
   consumedAt?: Timestamp;
   cancelledAt?: Timestamp;
+}
+
+export interface DesktopLoginTokenClaims {
+  codraDeviceId: string;
+  codraKeyThumbprint: string;
+  codraDeviceKind: "host";
+  codraDeviceGeneration: number;
 }
 
 export type RawDesktopLoginRequest = {
@@ -212,12 +219,14 @@ function assertLiveTransaction(
     throw new HttpsError("failed-precondition", "LOGIN_CONSUMED");
 }
 
-function requireGoogleAccount(request: CallableRequest<unknown>): { uid: string } {
-  if (!request.auth?.uid) throw new HttpsError("unauthenticated", "AUTH_REQUIRED");
-  if (request.auth.token.firebase?.sign_in_provider !== "google.com")
+export function validateGoogleLoginClaims(
+  input: { uid?: string; provider?: unknown; authTime?: unknown },
+  now = Date.now(),
+): { uid: string } {
+  if (!input.uid) throw new HttpsError("unauthenticated", "AUTH_REQUIRED");
+  if (input.provider !== "google.com")
     throw new HttpsError("permission-denied", "GOOGLE_ACCOUNT_REQUIRED");
-  const authTime = request.auth.token.auth_time;
-  const now = Date.now();
+  const authTime = input.authTime;
   if (
     typeof authTime !== "number" ||
     !Number.isFinite(authTime) ||
@@ -226,7 +235,15 @@ function requireGoogleAccount(request: CallableRequest<unknown>): { uid: string 
   ) {
     throw new HttpsError("unauthenticated", "RECENT_GOOGLE_AUTH_REQUIRED");
   }
-  return { uid: request.auth.uid };
+  return { uid: input.uid };
+}
+
+function requireGoogleAccount(request: CallableRequest<unknown>): { uid: string } {
+  return validateGoogleLoginClaims({
+    uid: request.auth?.uid,
+    provider: request.auth?.token.firebase?.sign_in_provider,
+    authTime: request.auth?.token.auth_time,
+  });
 }
 
 function parseCallableInput<T>(schema: z.ZodType<T>, data: unknown): T {
@@ -246,6 +263,93 @@ function inspectResponse(transaction: DesktopLoginTransaction): {
     action: transaction.action,
     displayName: transaction.displayName,
     fingerprintSuffix: transaction.keyThumbprint.slice(-8),
+  };
+}
+
+export function authorizeDesktopLoginTransaction(
+  transaction: DesktopLoginTransaction,
+  ownerUid: string,
+  state: string,
+  code: string,
+  now: Timestamp,
+): Pick<DesktopLoginTransaction, "status" | "ownerUid" | "codeHash" | "codeExpiresAt" | "authorizedAt"> {
+  assertLiveTransaction(transaction, now);
+  if (!safeEquals(transaction.stateHash, sha256Base64Url(state)))
+    throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
+  if (transaction.status !== "pending")
+    throw new HttpsError("failed-precondition", "LOGIN_ALREADY_AUTHORIZED");
+  return {
+    status: "authorized",
+    ownerUid,
+    codeHash: sha256Base64Url(code),
+    codeExpiresAt: Timestamp.fromMillis(now.toMillis() + CODE_TTL_MS),
+    authorizedAt: now,
+  };
+}
+
+export async function validateDesktopLoginRedeem(
+  login: DesktopLoginTransaction,
+  input: z.infer<typeof DesktopLoginRedeemRequestSchema>,
+  now: Timestamp,
+): Promise<void> {
+  assertLiveTransaction(login, now);
+  if (login.status !== "authorized")
+    throw new HttpsError("failed-precondition", "LOGIN_NOT_AUTHORIZED");
+  if (
+    !login.ownerUid ||
+    !login.codeHash ||
+    !login.codeExpiresAt ||
+    toMillis(login.codeExpiresAt) <= now.toMillis()
+  ) {
+    throw new HttpsError("failed-precondition", "LOGIN_CODE_EXPIRED");
+  }
+  if (!safeEquals(login.codeHash, sha256Base64Url(input.code)))
+    throw new HttpsError("permission-denied", "LOGIN_CODE_INVALID");
+  if (!safeEquals(login.stateHash, sha256Base64Url(input.state)))
+    throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
+  if (!safeEquals(login.nonce, input.nonce))
+    throw new HttpsError("permission-denied", "LOGIN_NONCE_INVALID");
+  if (!safeEquals(login.pkceChallenge, createPkceChallenge(input.pkceVerifier)))
+    throw new HttpsError("permission-denied", "PKCE_VERIFIER_INVALID");
+  if (
+    !(await verifyCanonicalPayload(
+      login.publicKeyJwk,
+      input.deviceSignature,
+      buildDesktopLoginRedeemSigningPayload({
+        attemptId: input.attemptId,
+        code: input.code,
+        state: input.state,
+        nonce: input.nonce,
+        deviceId: login.deviceId,
+        keyThumbprint: login.keyThumbprint,
+      }),
+    ))
+  ) {
+    throw new HttpsError("permission-denied", "REDEEM_SIGNATURE_INVALID");
+  }
+}
+
+export function cancelDesktopLoginTransaction(
+  transaction: DesktopLoginTransaction,
+  state: string,
+  now: Timestamp,
+): { cancelled: boolean; cancelledAt?: Timestamp } {
+  if (!safeEquals(transaction.stateHash, sha256Base64Url(state)))
+    throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
+  if (transaction.status === "cancelled") return { cancelled: true };
+  if (transaction.status !== "pending" && transaction.status !== "authorized")
+    throw new HttpsError("failed-precondition", "LOGIN_NOT_CANCELLABLE");
+  return { cancelled: true, cancelledAt: now };
+}
+
+export function desktopLoginTokenClaims(
+  device: Pick<RemoteDevice, "deviceId" | "keyThumbprint" | "generation">,
+): DesktopLoginTokenClaims {
+  return {
+    codraDeviceId: device.deviceId,
+    codraKeyThumbprint: device.keyThumbprint,
+    codraDeviceKind: "host",
+    codraDeviceGeneration: device.generation,
   };
 }
 
@@ -349,18 +453,16 @@ export const authorizeDesktopLogin = onCall(
     await adminDb.runTransaction(async (firestoreTransaction) => {
       const snapshot = await firestoreTransaction.get(ref);
       const transaction = parseTransaction(snapshot);
-      assertLiveTransaction(transaction, now);
-      if (!safeEquals(transaction.stateHash, sha256Base64Url(input.state)))
-        throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
-      if (transaction.status !== "pending")
-        throw new HttpsError("failed-precondition", "LOGIN_ALREADY_AUTHORIZED");
-      firestoreTransaction.update(ref, {
-        status: "authorized",
-        ownerUid: account.uid,
-        codeHash: sha256Base64Url(code),
-        codeExpiresAt: Timestamp.fromMillis(now.toMillis() + CODE_TTL_MS),
-        authorizedAt: now,
-      });
+      firestoreTransaction.update(
+        ref,
+        authorizeDesktopLoginTransaction(
+          transaction,
+          account.uid,
+          input.state,
+          code,
+          now,
+        ),
+      );
     });
     return {
       attemptId: input.attemptId,
@@ -387,49 +489,18 @@ export const desktopLoginRedeem = onRequest(
       const device = await adminDb.runTransaction(async (firestoreTransaction) => {
         const loginSnapshot = await firestoreTransaction.get(ref);
         const login = parseTransaction(loginSnapshot);
-        assertLiveTransaction(login, now);
-        if (login.status !== "authorized")
-          throw new HttpsError("failed-precondition", "LOGIN_NOT_AUTHORIZED");
-        if (
-          !login.ownerUid ||
-          !login.codeHash ||
-          !login.codeExpiresAt ||
-          toMillis(login.codeExpiresAt) <= now.toMillis()
-        ) {
-          throw new HttpsError("failed-precondition", "LOGIN_CODE_EXPIRED");
-        }
-        if (!safeEquals(login.codeHash, sha256Base64Url(input.code)))
-          throw new HttpsError("permission-denied", "LOGIN_CODE_INVALID");
-        if (!safeEquals(login.stateHash, sha256Base64Url(input.state)))
-          throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
-        if (!safeEquals(login.nonce, input.nonce))
-          throw new HttpsError("permission-denied", "LOGIN_NONCE_INVALID");
-        if (!safeEquals(login.pkceChallenge, createPkceChallenge(input.pkceVerifier)))
-          throw new HttpsError("permission-denied", "PKCE_VERIFIER_INVALID");
-        if (
-          !(await verifyCanonicalPayload(
-            login.publicKeyJwk,
-            input.deviceSignature,
-            buildDesktopLoginRedeemSigningPayload({
-              attemptId: input.attemptId,
-              code: input.code,
-              state: input.state,
-              nonce: input.nonce,
-              deviceId: login.deviceId,
-              keyThumbprint: login.keyThumbprint,
-            }),
-          ))
-        ) {
-          throw new HttpsError("permission-denied", "REDEEM_SIGNATURE_INVALID");
-        }
-        const deviceRef = adminDb.doc(`users/${login.ownerUid}/devices/${login.deviceId}`);
+        await validateDesktopLoginRedeem(login, input, now);
+        if (!login.ownerUid)
+          throw new HttpsError("failed-precondition", "LOGIN_OWNER_MISSING");
+        const ownerUid = login.ownerUid;
+        const deviceRef = adminDb.doc(`users/${ownerUid}/devices/${login.deviceId}`);
         const deviceSnapshot = await firestoreTransaction.get(deviceRef);
         const current = deviceSnapshot.exists ? deviceSnapshot.data() : undefined;
         let generation = 1;
         let createdAt = now;
         if (current) {
           if (
-            current.ownerUid !== login.ownerUid ||
+            current.ownerUid !== ownerUid ||
             current.kind !== "host" ||
             current.keyThumbprint !== login.keyThumbprint
           ) {
@@ -452,7 +523,7 @@ export const desktopLoginRedeem = onRequest(
         const expiresAt = Timestamp.fromMillis(now.toMillis() + 120_000);
         const stored = {
           deviceId: login.deviceId,
-          ownerUid: login.ownerUid,
+          ownerUid,
           kind: "host" as const,
           displayName: login.displayName,
           publicKeyJwk: login.publicKeyJwk,
@@ -472,12 +543,10 @@ export const desktopLoginRedeem = onRequest(
         });
         return stored;
       });
-      const token = await adminAuth.createCustomToken(device.ownerUid, {
-        codraDeviceId: device.deviceId,
-        codraKeyThumbprint: device.keyThumbprint,
-        codraDeviceKind: "host",
-        codraDeviceGeneration: device.generation,
-      });
+      const token = await adminAuth.createCustomToken(
+        device.ownerUid,
+        desktopLoginTokenClaims(device),
+      );
       return {
         token,
         serverTimeMillis: now.toMillis(),
@@ -496,17 +565,14 @@ export const desktopLoginCancel = onRequest(
       const cancelled = await adminDb.runTransaction(async (firestoreTransaction) => {
         const snapshot = await firestoreTransaction.get(ref);
         const transaction = parseTransaction(snapshot);
-        if (!safeEquals(transaction.stateHash, sha256Base64Url(input.state)))
-          throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
-        if (transaction.status === "cancelled") return true;
-        if (
-          transaction.status !== "pending" &&
-          transaction.status !== "authorized"
-        ) {
-          throw new HttpsError("failed-precondition", "LOGIN_NOT_CANCELLABLE");
+        const result = cancelDesktopLoginTransaction(transaction, input.state, now);
+        if (result.cancelledAt) {
+          firestoreTransaction.update(ref, {
+            status: "cancelled",
+            cancelledAt: result.cancelledAt,
+          });
         }
-        firestoreTransaction.update(ref, { status: "cancelled", cancelledAt: now });
-        return true;
+        return result.cancelled;
       });
       return { cancelled };
     }),

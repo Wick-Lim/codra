@@ -9,7 +9,7 @@ Allow a production CODRA Electron host to authenticate through the Firebase Host
 ## Approved flow
 
 1. Electron main creates or loads its P-256 host identity, binds an HTTP listener to `127.0.0.1` on an ephemeral port, and generates a fresh attempt ID, state, nonce, and PKCE verifier.
-2. Electron signs the start binding with the host key and calls the regional `desktopLoginStart` HTTP Function. The Function stores a short-lived pending transaction containing the device public key, thumbprint, PKCE challenge, state hash, callback port/path, and nonce.
+2. Electron signs the start binding with the host key and calls the regional `desktopLoginStart` HTTP Function. The Function stores a short-lived pending transaction containing the device public key, thumbprint, PKCE challenge, state hash, callback port/path, and Electron-generated nonce, then returns that nonce as the server-confirmed transaction nonce.
 3. Electron opens only `https://codra-1b3bb.firebaseapp.com/desktop-auth?attempt=...&state=...` with `shell.openExternal`.
 4. The hosted bridge uses a dedicated Firebase Auth instance to sign the user in with Google. It calls `authorizeDesktopLogin` first in inspect mode, shows the requested device name/fingerprint and action, and requires an explicit Allow click.
 5. Allow consumes the transaction exactly once and returns a one-time code plus the server-approved loopback callback URL. The bridge performs one top-level navigation to that callback with only `attempt`, `code`, and `state`.
@@ -45,4 +45,3 @@ Every boundary returns a safe error code without credentials, private keys, SDP,
 - Functions tests cover Google-provider rejection, transaction one-time consume, callback/nonce/PKCE mismatch, resume key mismatch, and custom-token claim shape.
 - Electron tests cover exact loopback callback acceptance/rejection, first-valid callback race, timeout/cancel cleanup, and no embedded OAuth.
 - Web build and remote-test build confirm the production bridge is absent from the remote-test artifact and the hosted bridge route renders.
-

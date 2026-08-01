@@ -120,7 +120,7 @@ git commit -m "feat: freeze desktop login contracts"
 
 Cover:
 - start rejects non-POST, present Origin, wrong content type, malformed input, bad start signature, and duplicate attempt IDs;
-- start stores only bounded device/login metadata, state hash, callback port/path, PKCE challenge, nonce, and expiry;
+- start stores only bounded device/login metadata, state hash, callback port/path, PKCE challenge, and the Electron-generated nonce; the returned `serverNonce` is the server-confirmed echo of that transaction-bound nonce;
 - inspect rejects absent/non-Google Auth, wrong state, missing transaction, expired/cancelled/consumed transaction;
 - allow writes owner UID and a hashed one-time code exactly once and returns the callback URL;
 - redeem rejects wrong code/state/nonce/verifier/signature and consumes a valid code exactly once;
@@ -142,7 +142,7 @@ Use `crypto.randomBytes(32)` for codes/nonces and `sha256Base64Url` for code/sta
 
 - [ ] **Step 3: Implement start and authorization**
 
-Start verifies the device public key thumbprint and `startSignature`, stores a five-minute pending transaction, and returns `{attemptId, serverNonce, expiresAt, callbackUrl}`.
+Start verifies the device public key thumbprint and `startSignature`, stores a five-minute pending transaction, and returns `{attemptId, serverNonce, expiresAt, callbackUrl}`. `serverNonce` equals the validated Electron-generated nonce from the start request; it is not a second caller-visible nonce.
 
 Authorization calls `requireGoogleAccount`, validates recent `auth_time` (five minutes, 30-second future skew), verifies state hash, and returns inspect metadata. Allow uses a transaction to write owner UID, code hash, code expiry, and authorized status before returning plaintext code exactly once.
 
@@ -327,5 +327,4 @@ git add scripts docs README.md
 git commit -m "docs: document Electron login bridge"
 git push origin main
 ```
-
 
