@@ -6,18 +6,18 @@
 
 ## Summary
 
-CODRA's first deliverable is a standalone macOS Electron application. A user can launch CODRA, open a local terminal, and run a shell or agent CLI without creating an account. Electron is the local UI, while an independent background `codrad` process owns PTYs, scrollback, and session state. The Electron window connects to `codrad` through authenticated local RPC.
+CODRA's first deliverable is a standalone macOS Electron application. A user can launch CODRA, open a local terminal, and run a shell or agent CLI without creating an account. The Electron main process owns PTYs, scrollback, session state, and later WebRTC connections. The sandboxed renderer accesses only a narrow preload API over Electron IPC.
 
-Remote access is the second layer on top of that working desktop host. After the user signs in and enables remote access, the Electron/codrad installation registers as a selectable host. A signed-in browser can then attach to that host. Firebase Authentication establishes identity, Firestore carries short-lived WebRTC signaling records, and encrypted WebRTC DataChannels carry terminal traffic directly or through Cloudflare TURN.
+Remote access is the second layer on top of that working desktop host. After the user signs in and enables remote access, the running Electron application registers as a selectable host. A signed-in browser can then attach to that host. Firebase Authentication establishes identity, Firestore carries short-lived WebRTC signaling records, and encrypted WebRTC DataChannels carry terminal traffic directly or through Cloudflare TURN.
 
-The web application is never a standalone terminal host and cannot create a host shell. It is only a remote client for an already installed, online, and approved CODRA desktop host. Closing the Electron window must not end `codrad`, its PTYs, or an active remote connection.
+The web application is never a standalone terminal host and cannot create a host shell. It is only a remote client for an installed, running, and approved CODRA desktop host. Closing the Electron window leaves the Electron main process running on macOS, so PTYs and active remote connections remain available. Explicitly quitting CODRA ends PTYs and remote connections after a warning.
 
 ## Goals
 
 1. Ship a standalone Electron application that works locally without login or Firebase availability.
-2. Start or reconnect to an independent `codrad` process from Electron through versioned local RPC.
+2. Keep all privileged terminal and WebRTC operations in the Electron main process behind a versioned preload API.
 3. Create, list, attach to, write to, and resize host PTYs in the Electron UI.
-4. Keep `codrad` and its PTYs alive when the Electron window closes, then reattach when it reopens.
+4. Keep the Electron main process and its PTYs alive when the window closes, then reattach when it reopens.
 5. Add opt-in Firebase Authentication and register the installed desktop as a remote host.
 6. Register browser devices, display recently active hosts, and require host-signed approval.
 7. Exchange SDP offers, answers, and trickled ICE candidates through Firestore.
@@ -35,7 +35,8 @@ The web application is never a standalone terminal host and cannot create a host
 - File transfer, browser streaming, desktop screen sharing, or port forwarding
 - Running a shell inside the browser
 - Synchronizing SQLite or terminal transcripts through Firestore
-- Surviving a `codrad` process or machine restart in this slice; PTYs survive Electron window closure and web disconnects, while daemon crash recovery is a later milestone
+- Keeping PTYs alive after the user explicitly quits CODRA or after an Electron process or machine restart
+- A separately installed daemon, launch agent, background service, or Unix-socket RPC server
 - Hardware-backed device attestation; the MVP uses a software P-256 host key stored in the macOS Keychain
 - Supporting Windows or Linux packaging in the first release, although protocol and package boundaries remain portable
 
@@ -44,10 +45,10 @@ The web application is never a standalone terminal host and cannot create a host
 | Area | Choice |
 | --- | --- |
 | Host UI | Electron + React |
-| Host runtime | Independent Node.js `codrad` process |
+| Host runtime | Electron main process |
 | Local terminal UI | xterm.js in Electron renderer |
-| Local transport | Versioned RPC over Unix domain socket |
-| Host WebRTC | `node-datachannel` in `codrad` |
+| Local transport | Electron IPC through a context-isolated preload bridge |
+| Host WebRTC | `node-datachannel` in Electron main process |
 | Host terminal | `node-pty` |
 | Web client | React + Vite + xterm.js |
 | Identity | Firebase Authentication |
@@ -55,32 +56,27 @@ The web application is never a standalone terminal host and cannot create a host
 | Server functions | Firebase Functions 2nd gen |
 | TURN | Cloudflare Realtime TURN |
 | Local metadata | SQLite WAL |
-| Local scrollback | Append-only files owned by `codrad` |
+| Local scrollback | Append-only files owned by Electron main process |
 | Validation | Vitest, Firebase Emulator Suite, Playwright |
 
-`node-datachannel` is selected over a hidden Electron renderer because the remote endpoint must remain available when the desktop window is closed. A central WebSocket terminal relay is rejected because it would put terminal contents on a hosted data path and weaken CODRA's local-first privacy boundary.
+`node-datachannel` runs in Electron main rather than a hidden renderer so the remote endpoint remains available when the desktop window is closed. A separate daemon is intentionally omitted for the MVP. A central WebSocket terminal relay is rejected because it would put terminal contents on a hosted data path and weaken CODRA's local-first privacy boundary.
 
 ## System Architecture
 
 ```text
 ┌─────────────────────────┐
 │ CODRA Desktop           │
-│ Electron + React        │
-│ local xterm.js terminal │
-└────────────┬────────────┘
-             │ authenticated local RPC
-             │ Unix domain socket
-┌────────────▼────────────┐      WebRTC DataChannels      ┌──────────────────────────┐
-│ codrad on host Mac      │◀─────────────────────────────▶│ Optional web client      │
-│ terminal/session owner  │   direct or Cloudflare TURN  │ React + xterm.js         │
+│                         │
+│ Renderer                │
+│ React + xterm.js        │
+│       │ preload IPC     │
+│ Main process            │      WebRTC DataChannels      ┌──────────────────────────┐
+│ terminal/session owner  │◀─────────────────────────────▶│ Optional web client      │
+│ node-pty                │   direct or Cloudflare TURN  │ React + xterm.js         │
 │ node-datachannel        │                               │ Browser RTCPeerConnection│
 └────────────┬────────────┘                               └──────────────────────────┘
              │
-       ┌─────▼─────┐
-       │ node-pty  │
-       │ shell /   │
-       │ agent CLI │
-       └───────────┘
+       shell / agent CLI
 
 Firebase control plane
 ├─ Authentication: user identity
@@ -96,11 +92,11 @@ The standalone desktop path is a complete product increment and is implemented b
 
 ```text
 Launch CODRA Desktop
-→ start or reconnect to codrad
-→ create local PTY
+→ initialize Electron main process
+→ create a PTY in Electron main
 → render it in Electron xterm.js
 → type, resize, detach, and reattach
-→ close Electron window while codrad and PTY remain alive
+→ close Electron window while the main process and PTY remain alive
 → reopen Electron and restore the terminal list and scrollback
 ```
 
@@ -113,28 +109,26 @@ Sign in on web
 → select an online CODRA Desktop host
 → request host approval
 → negotiate WebRTC through Firestore
-→ attach to a PTY already owned by codrad
+→ attach to a PTY already owned by the Electron main process
 ```
 
 ## Component Boundaries
 
-### `apps/daemon`
-
-The host runtime owns PTYs, WebRTC peer connections, session authorization, scrollback, and protocol routing. It exposes a local versioned RPC interface to Electron and a restricted remote protocol over WebRTC. The remote protocol cannot invoke arbitrary daemon methods; only explicitly registered remote operations are routable.
-
 ### `apps/desktop`
 
-The Electron application is CODRA's primary product surface. It starts or discovers `codrad`, authenticates the local socket, renders local xterm.js terminals, and restores the daemon's terminal list and scrollback. These features work without login. Closing the window leaves the background daemon alive.
+The Electron application is CODRA's primary product surface. Its main process owns PTYs, WebRTC peer connections, session authorization, scrollback, and protocol routing. Its context-isolated preload exposes a versioned allowlist of terminal operations to the sandboxed React renderer. Local terminals and scrollback work without login.
 
-When remote access is enabled, the desktop also signs the user in, shows device presence, and presents host approval prompts. On first host registration, `codrad` generates a P-256 signing key and stores its private material in the macOS Keychain; the public JWK is registered with Firebase. The desktop forwards a Firebase ID token to the daemon through authenticated local IPC; it never forwards a refresh token or private device key over WebRTC.
+Closing the last window on macOS hides the application while leaving the main process, PTYs, and remote connections alive. The dock or menu-bar action reopens a renderer and reattaches it. Choosing Quit warns about active terminals and connections, then closes them and exits; there is no separately installed service.
+
+When remote access is enabled, the desktop also signs the user in, shows device presence, and presents host approval prompts. On first host registration, Electron main generates a P-256 signing key and stores its private material in the macOS Keychain; the public JWK is registered with Firebase. Refresh tokens and the private device key remain in the main process and are never exposed through preload or WebRTC.
 
 ### `apps/web`
 
-The web application signs the user in, lists their online hosts, requests a session, performs browser-side WebRTC negotiation, renders xterm.js, and reconnects with a terminal cursor. It does not receive Cloudflare API tokens, Firebase Admin credentials, host filesystem paths beyond explicitly returned display values, or local daemon credentials.
+The web application signs the user in, lists their online Electron hosts, requests a session, performs browser-side WebRTC negotiation, renders xterm.js, and reconnects with a terminal cursor. It does not receive Cloudflare API tokens, Firebase Admin credentials, host filesystem paths beyond explicitly returned display values, or Electron main-process credentials.
 
 ### `packages/protocol`
 
-This package contains shared Zod schemas, protocol version negotiation, control messages, terminal binary frame codecs, and error codes. Both the browser and daemon must validate all untrusted messages at the boundary.
+This package contains shared Zod schemas, protocol version negotiation, control messages, terminal binary frame codecs, and error codes. Both the browser and Electron main process validate all untrusted messages at the boundary.
 
 ### `packages/firebase`
 
@@ -283,7 +277,7 @@ Firebase Auth identifies the account, while the registered P-256 key distinguish
 
 ## App Check
 
-The web application uses Firebase App Check with reCAPTCHA Enterprise in production and the debug provider only in local development and CI. Firestore and web-facing callable Functions begin in metrics mode, then enforcement is enabled after legitimate production traffic is verified. Host-only functions accept Firebase Auth plus a signature from the registered host key because the daemon has no built-in desktop App Check provider. This signature proves possession of the registered software key; it does not claim that the host binary is untampered.
+The web application uses Firebase App Check with reCAPTCHA Enterprise in production and the debug provider only in local development and CI. Firestore and web-facing callable Functions begin in metrics mode, then enforcement is enabled after legitimate production traffic is verified. Host-only functions accept Firebase Auth plus a signature from the registered host key because Electron main has no built-in desktop App Check provider. This signature proves possession of the registered software key; it does not claim that the host binary is untampered.
 
 ## TURN Credential Functions
 
@@ -338,19 +332,19 @@ The 24-hour credential TTL is longer than the eight-hour remote session lease. A
 
 ## ICE Server Normalization
 
-Cloudflare returns standard `RTCIceServer[]`. The browser passes compatible entries to `RTCPeerConnection`, excluding port 53 URLs because browsers commonly block that port and it can delay gathering. The daemon converts each TURN URL to a structured `node-datachannel` `IceServer` with the correct `TurnUdp`, `TurnTcp`, or `TurnTls` relay type and preserves the returned username and credential.
+Cloudflare returns standard `RTCIceServer[]`. The browser passes compatible entries to `RTCPeerConnection`, excluding port 53 URLs because browsers commonly block that port and it can delay gathering. Electron main converts each TURN URL to a structured `node-datachannel` `IceServer` with the correct `TurnUdp`, `TurnTcp`, or `TurnTls` relay type and preserves the returned username and credential.
 
 The default policy is `all`, which tries host, server-reflexive, and relay candidates. Tests also support `relay` to prove traffic can traverse Cloudflare TURN. Trickle ICE remains enabled so candidate gathering does not block offer creation.
 
 ## Signaling Flow
 
 1. Host and web client sign in to the same Firebase account.
-2. `codrad` publishes a host device heartbeat through the authenticated desktop session.
+2. Electron main publishes a host device heartbeat through the authenticated desktop session.
 3. The web client creates a `requested` remote session for a selected host.
 4. Electron shows the requesting device and scopes; the host approves or rejects locally, signs the decision with its Keychain-backed key, and calls `approveRemoteSession`.
 5. Both peers obtain short-lived TURN configuration from the callable function.
 6. The web client creates an offer and appends it to `signals`.
-7. `codrad` validates the offer, sets it as remote description, creates an answer, and appends the answer.
+7. Electron main validates the offer, sets it as remote description, creates an answer, and appends the answer.
 8. Both peers append trickled ICE candidates and deduplicate received candidates.
 9. The WebRTC connection opens `codra.control.v1` and `codra.terminal.v1` DataChannels.
 10. The protocol handshake binds the channel to `sessionId`, `requestNonce`, and protocol version 1.
@@ -378,7 +372,7 @@ session.pong
 error
 ```
 
-The daemon rejects unknown message types, unsupported protocol versions, duplicate request IDs with conflicting bodies, oversized messages, terminal IDs outside the session, and operations outside approved scopes.
+Electron main rejects unknown message types, unsupported protocol versions, duplicate request IDs with conflicting bodies, oversized messages, terminal IDs outside the session, and operations outside approved scopes.
 
 ### Terminal channel: `codra.terminal.v1`
 
@@ -397,13 +391,13 @@ Output is chunked at 16 KiB. Input remains on the control channel so output cong
 
 ## PTY and Scrollback Behavior
 
-`codrad` owns every PTY. A terminal record contains its ID, display title, shell command, working directory display value, dimensions, process state, and current scrollback cursor. Raw credentials and environment values are never returned.
+Electron main owns every PTY. A terminal record contains its ID, display title, shell command, working directory display value, dimensions, process state, and current scrollback cursor. Raw credentials and environment values are never returned.
 
 Terminal output is appended to a local bounded scrollback file before it is offered to remote clients. Each attachment tracks its last acknowledged cursor. When a browser reconnects, it requests `terminal.attach` with the last durable cursor and receives missing chunks before live output resumes.
 
-When `bufferedAmount` exceeds 1 MiB, the daemon stops enqueueing live terminal frames for that attachment while continuing to persist output locally. Sending resumes below 256 KiB from the last acknowledged cursor. A slow browser therefore catches up without blocking the PTY or the control channel.
+When `bufferedAmount` exceeds 1 MiB, Electron main stops enqueueing live terminal frames for that attachment while continuing to persist output locally. Sending resumes below 256 KiB from the last acknowledged cursor. A slow browser therefore catches up without blocking the PTY or the control channel.
 
-The daemon validates resize values within 20–400 columns and 5–200 rows. A single input message is limited to 64 KiB and per-session input is rate-limited to protect the daemon from accidental floods.
+Electron main validates resize values within 20–400 columns and 5–200 rows. A single input message is limited to 64 KiB and per-session input is rate-limited to protect the application from accidental floods.
 
 ## Connection Recovery
 
@@ -454,7 +448,7 @@ Client-facing errors contain a safe message and retryability flag. Firebase, Clo
 
 ### Unit tests
 
-- Cloudflare response validation and browser/daemon ICE normalization
+- Cloudflare response validation and browser/Electron ICE normalization
 - TURN URL mapping for UDP, TCP, and TLS
 - Protocol schema acceptance and rejection
 - Terminal binary frame encode/decode
@@ -475,16 +469,16 @@ Client-facing errors contain a safe message and retryability flag. Firebase, Clo
 
 ### Integration tests
 
-- Electron launches and connects to a newly started daemon over the local socket
-- Electron creates, renders, writes to, resizes, detaches from, and reattaches to a local PTY without Firebase
-- Closing and reopening the Electron window preserves the daemon, PTY process, terminal list, and scrollback
+- Electron main exposes only the approved preload operations to the sandboxed renderer
+- Electron creates, renders, writes to, resizes, detaches from, and reattaches to a main-process PTY without Firebase
+- Closing and reopening the Electron window preserves the main process, PTY, terminal list, and scrollback
 - Local terminal startup still succeeds when Firebase endpoints are unavailable
 - Browser `RTCPeerConnection` interoperates with `node-datachannel`
 - Offer, answer, and trickled candidates traverse Firestore Emulator
 - Terminal creation, output, input, resize, detach, and reattach
 - Ten MiB output burst does not delay control responses beyond one second
 - Browser disconnect followed by cursor-based catch-up has no duplicated bytes
-- Closing Electron leaves the daemon and terminal remotely available
+- Closing the Electron window while leaving the app running keeps the terminal remotely available
 
 ### Hosted smoke tests
 
@@ -499,7 +493,7 @@ The real TURN smoke suite is opt-in and uses Secret Manager. It is not run for u
 
 ## Deployment Shape
 
-- The first distributable is a signed macOS Electron application with `codrad` installed as a background user service.
+- The first distributable is one signed macOS Electron application with no separately installed daemon or background service.
 - Local terminal features have no runtime dependency on Firebase or Cloudflare.
 - Firebase Hosting serves `apps/web`.
 - Firebase Functions 2nd gen run in `asia-northeast3`.
@@ -510,9 +504,9 @@ The real TURN smoke suite is opt-in and uses Secret Manager. It is not run for u
 ## Delivery Milestones
 
 1. **Greenfield foundation:** pnpm monorepo, TypeScript, linting, testing, CI, shared schemas, Electron build pipeline.
-2. **Standalone desktop shell:** Electron window, secure preload bridge, local daemon bootstrap, authenticated Unix-socket RPC.
-3. **Local terminal core:** `node-pty`, terminal registry, Electron xterm.js, input, resize, detach, bounded scrollback.
-4. **Desktop lifecycle:** daemon background service, window-close persistence, reopen/reattach, macOS development packaging.
+2. **Standalone desktop shell:** Electron main/renderer split, context isolation, sandboxing, secure versioned preload bridge.
+3. **Local terminal core:** main-process `node-pty`, terminal registry, Electron xterm.js, input, resize, detach, bounded scrollback.
+4. **Desktop lifecycle:** window-close persistence in Electron main, reopen/reattach, quit warning, macOS development packaging.
 5. **Identity and devices:** opt-in host/web sign-in, host key registration, heartbeat, host list, rules tests.
 6. **TURN boundary:** authenticated issue/revoke functions, Secret Manager binding, Cloudflare adapter tests.
 7. **Transport proof:** Firestore signaling and browser-to-`node-datachannel` DataChannel with direct and relay smoke tests.
@@ -524,15 +518,15 @@ Each milestone must produce a separately testable result. Full CODRA Task and ag
 ## Acceptance Criteria
 
 1. CODRA launches as a standalone Electron application on macOS without requiring login.
-2. With Firebase and Cloudflare unavailable, Electron can still create and operate a local shell through `codrad`.
+2. With Firebase and Cloudflare unavailable, Electron can still create and operate a local shell in its main process.
 3. The Electron terminal supports ANSI rendering, input, resize, detach, and reattach.
-4. Closing the Electron window does not terminate `codrad` or its PTYs; reopening restores the terminal list and scrollback.
+4. Closing the Electron window does not terminate the Electron main process or its PTYs; reopening restores the terminal list and scrollback, while explicitly quitting CODRA ends them after a warning.
 5. Remote access is disabled by default and can be enabled without changing local terminal behavior.
 6. A user can sign in on the host Mac and in a supported desktop browser with the same Firebase account.
 7. The browser displays the installed CODRA host as online within 60 seconds and offline within 120 seconds of heartbeat loss.
 8. A new browser cannot connect until the selected host signs and approves its session request; another same-account browser cannot forge that approval.
 9. The same web client connects over direct ICE when possible and over forced Cloudflare TURN in the relay smoke test.
-10. The web client can list, create, attach to, type into, and resize a PTY owned by the selected `codrad` host.
+10. The web client can list, create, attach to, type into, and resize a PTY owned by the selected Electron host.
 11. Reconnecting after a temporary disconnect restores output from the last acknowledged cursor without duplicated terminal bytes.
 12. A ten MiB output burst does not freeze local or remote input, resize, ping, or detach handling.
 13. Cross-user Firestore access, forged host approvals, and unauthorized TURN issuance are denied by automated tests.
@@ -543,4 +537,4 @@ Each milestone must produce a separately testable result. Full CODRA Task and ag
 
 ## Follow-on Work
 
-After this design is implemented, the same authenticated WebRTC transport can carry read-only Task snapshots, agent status events, `Needs You` responses, and validation summaries. Those capabilities will use new versioned remote methods rather than exposing the daemon's full local RPC surface. Cross-user teams, hardware-backed device attestation, mobile clients, file transfer, and remote browser views require separate designs.
+After this design is implemented, the same authenticated WebRTC transport can carry read-only Task snapshots, agent status events, `Needs You` responses, and validation summaries. Those capabilities will use new versioned remote methods rather than exposing Electron main's full local IPC surface. Cross-user teams, hardware-backed device attestation, mobile clients, file transfer, and remote browser views require separate designs.
