@@ -17,8 +17,12 @@ const descriptor: TerminalDescriptor = {
 
 describe("SqliteTerminalRepository", () => {
   const directories: string[] = [];
+  const repositories: SqliteTerminalRepository[] = [];
 
   afterEach(async () => {
+    for (const repository of repositories.splice(0)) {
+      repository.close();
+    }
     await Promise.all(
       directories
         .splice(0)
@@ -32,17 +36,26 @@ describe("SqliteTerminalRepository", () => {
     return join(directory, "nested", "terminals.db");
   }
 
-  it("persists descriptors in WAL mode", async () => {
-    const repository = new SqliteTerminalRepository(await databasePath());
-    await repository.save(descriptor);
+  function openRepository(path: string): SqliteTerminalRepository {
+    const repository = new SqliteTerminalRepository(path);
+    repositories.push(repository);
+    return repository;
+  }
 
-    expect(await repository.list()).toEqual([descriptor]);
+  it("persists descriptors and WAL schema across reopen", async () => {
+    const path = await databasePath();
+    const repository = openRepository(path);
+    await repository.save(descriptor);
     expect(repository.journalMode()).toBe("wal");
     repository.close();
+
+    const reopened = openRepository(path);
+    expect(reopened.journalMode()).toBe("wal");
+    expect(await reopened.list()).toEqual([descriptor]);
   });
 
   it("updates a persisted descriptor", async () => {
-    const repository = new SqliteTerminalRepository(await databasePath());
+    const repository = openRepository(await databasePath());
     await repository.save(descriptor);
     await repository.update({
       ...descriptor,
@@ -54,17 +67,15 @@ describe("SqliteTerminalRepository", () => {
     expect(await repository.list()).toEqual([
       { ...descriptor, cols: 80, rows: 24, title: "smaller shell" },
     ]);
-    repository.close();
   });
 
   it("marks stale running descriptors exited after an abnormal restart", async () => {
-    const repository = new SqliteTerminalRepository(await databasePath());
+    const repository = openRepository(await databasePath());
     await repository.save(descriptor);
     await repository.markRunningExited(-1);
 
     expect(await repository.list()).toEqual([
       { ...descriptor, state: "exited", exitCode: -1 },
     ]);
-    repository.close();
   });
 });

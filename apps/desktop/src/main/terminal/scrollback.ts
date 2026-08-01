@@ -6,6 +6,7 @@ import {
   rename,
   rm,
   stat,
+  truncate,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { TerminalIdSchema, type TerminalOutputChunk } from "@codra/protocol";
@@ -38,19 +39,20 @@ function parseRecord(line: string): StoredChunk | undefined {
       return { sequence: parsed.sequence, data: parsed.data };
     }
   } catch {
-    // A partial final record can result from an interrupted append.
+    return undefined;
   }
   return undefined;
 }
 
 function parseCompleteRecords(contents: string): StoredChunk[] {
   const lines = contents.split("\n");
-  if (lines.at(-1) !== "") {
-    lines.pop();
-  }
-  return lines.flatMap((line) => {
+  lines.pop();
+  return lines.map((line, index) => {
     const record = parseRecord(line);
-    return record === undefined ? [] : [record];
+    if (record === undefined) {
+      throw new Error(`Malformed scrollback record at line ${index + 1}`);
+    }
+    return record;
   });
 }
 
@@ -77,8 +79,15 @@ export class FileTerminalOutputStore implements TerminalOutputStore {
     return this.enqueue(terminalId, async () => {
       const sequence = await this.nextSequence(terminalId);
       const record = { sequence, data };
+      const encoded = encodeRecord(record);
+      const encodedSize = Buffer.byteLength(encoded, "utf8");
+      if (encodedSize > this.byteLimit) {
+        throw new RangeError(
+          `Encoded scrollback record (${encodedSize} bytes) exceeds the ${this.byteLimit}-byte scrollback limit`,
+        );
+      }
       await mkdir(this.root, { recursive: true });
-      await appendFile(this.pathFor(terminalId), encodeRecord(record), "utf8");
+      await appendFile(this.pathFor(terminalId), encoded, "utf8");
       this.nextSequences.set(terminalId, sequence + 1);
       await this.compact(terminalId);
       return { terminalId, ...record };
@@ -118,14 +127,16 @@ export class FileTerminalOutputStore implements TerminalOutputStore {
   private enqueue<T>(terminalId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.queues.get(terminalId) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(task);
-    this.queues.set(
-      terminalId,
-      operation.then(
-        () => undefined,
-        () => undefined,
-      ),
+    const tail = operation.then(
+      () => undefined,
+      () => undefined,
     );
-    return operation;
+    this.queues.set(terminalId, tail);
+    return operation.finally(() => {
+      if (this.queues.get(terminalId) === tail) {
+        this.queues.delete(terminalId);
+      }
+    });
   }
 
   private async nextSequence(terminalId: string): Promise<number> {
@@ -145,8 +156,17 @@ export class FileTerminalOutputStore implements TerminalOutputStore {
 
   private async readRecords(terminalId: string): Promise<StoredChunk[]> {
     try {
+      const path = this.pathFor(terminalId);
+      const contents = await readFile(path);
+      const completeLength =
+        contents.at(-1) === 0x0a
+          ? contents.length
+          : contents.lastIndexOf(0x0a) + 1;
+      if (completeLength !== contents.length) {
+        await truncate(path, completeLength);
+      }
       return parseCompleteRecords(
-        await readFile(this.pathFor(terminalId), "utf8"),
+        contents.subarray(0, completeLength).toString("utf8"),
       );
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {

@@ -1,10 +1,23 @@
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileTerminalOutputStore } from "./scrollback";
 
 const terminalId = "2a1e20df-860f-4f29-a2c3-b2f28d44c2e5";
+
+function operationQueues(
+  store: FileTerminalOutputStore,
+): Map<string, Promise<void>> {
+  return (store as unknown as { queues: Map<string, Promise<void>> }).queues;
+}
 
 describe("FileTerminalOutputStore", () => {
   const directories: string[] = [];
@@ -63,6 +76,40 @@ describe("FileTerminalOutputStore", () => {
     });
   });
 
+  it("truncates an unterminated crash tail before appending", async () => {
+    const root = await rootDirectory();
+    const path = new FileTerminalOutputStore(root, 1024).pathFor(terminalId);
+    await writeFile(
+      path,
+      '{"sequence":1,"data":"one"}\n{"sequence":2,"data":"partial',
+      "utf8",
+    );
+    const recovered = new FileTerminalOutputStore(root, 1024);
+
+    await expect(recovered.append(terminalId, "two")).resolves.toEqual({
+      terminalId,
+      sequence: 2,
+      data: "two",
+    });
+    await expect(recovered.readAfter(terminalId, 0, 10)).resolves.toEqual([
+      { terminalId, sequence: 1, data: "one" },
+      { terminalId, sequence: 2, data: "two" },
+    ]);
+  });
+
+  it("rejects a malformed complete record without appending to it", async () => {
+    const root = await rootDirectory();
+    const path = new FileTerminalOutputStore(root, 1024).pathFor(terminalId);
+    const corrupted = '{"sequence":1,"data":"one"}\n{"sequence":2,"data":}\n';
+    await writeFile(path, corrupted, "utf8");
+    const recovered = new FileTerminalOutputStore(root, 1024);
+
+    await expect(recovered.append(terminalId, "two")).rejects.toThrow(
+      "Malformed scrollback record at line 2",
+    );
+    await expect(readFile(path, "utf8")).resolves.toBe(corrupted);
+  });
+
   it("compacts to the configured byte limit without splitting UTF-8 records", async () => {
     const store = new FileTerminalOutputStore(await rootDirectory(), 96);
     for (let index = 0; index < 20; index += 1) {
@@ -82,6 +129,31 @@ describe("FileTerminalOutputStore", () => {
     ).toBe(true);
   });
 
+  it("rejects an oversized multibyte record without consuming its sequence", async () => {
+    const root = await rootDirectory();
+    const store = new FileTerminalOutputStore(root, 64);
+    await store.append(terminalId, "one");
+    const before = await readFile(store.pathFor(terminalId), "utf8");
+
+    await expect(store.append(terminalId, "한".repeat(20))).rejects.toThrow(
+      "exceeds the 64-byte scrollback limit",
+    );
+    await expect(readFile(store.pathFor(terminalId), "utf8")).resolves.toBe(
+      before,
+    );
+
+    const restarted = new FileTerminalOutputStore(root, 64);
+    await expect(restarted.append(terminalId, "two")).resolves.toEqual({
+      terminalId,
+      sequence: 2,
+      data: "two",
+    });
+    await expect(restarted.readAfter(terminalId, 0, 10)).resolves.toEqual([
+      { terminalId, sequence: 1, data: "one" },
+      { terminalId, sequence: 2, data: "two" },
+    ]);
+  });
+
   it("continues serving writes after a queued write fails", async () => {
     const store = new FileTerminalOutputStore(await rootDirectory(), 1024);
     const path = store.pathFor(terminalId);
@@ -95,6 +167,29 @@ describe("FileTerminalOutputStore", () => {
       sequence: 1,
       data: "recovered",
     });
+  });
+
+  it("releases settled queues after append, read, and remove", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 1024);
+
+    await store.append(terminalId, "one");
+    expect(operationQueues(store).size).toBe(0);
+    await store.readAfter(terminalId, 0, 10);
+    expect(operationQueues(store).size).toBe(0);
+    await store.remove(terminalId);
+    expect(operationQueues(store).size).toBe(0);
+  });
+
+  it("does not clear a newer queue tail when an older operation settles", async () => {
+    const store = new FileTerminalOutputStore(await rootDirectory(), 1024);
+    const operation = store.append(terminalId, "one");
+    const queues = operationQueues(store);
+    const newerTail = Promise.resolve();
+    queues.set(terminalId, newerTail);
+
+    await operation;
+
+    expect(queues.get(terminalId)).toBe(newerTail);
   });
 
   it("rejects terminal identifiers that cannot safely form a path", async () => {
