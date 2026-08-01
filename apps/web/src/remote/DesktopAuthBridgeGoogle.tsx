@@ -17,7 +17,10 @@ import {
   type DesktopAuthQuery,
 } from "./desktop-auth-contract";
 
-export { createDesktopCallbackNavigation, parseDesktopAuthQuery } from "./desktop-auth-contract";
+export {
+  createDesktopCallbackNavigation,
+  parseDesktopAuthQuery,
+} from "./desktop-auth-contract";
 
 const REDIRECT_STATE_KEY = "codra.desktop-auth.redirect.v1";
 const REDIRECT_MAX_AGE_MS = 5 * 60 * 1000;
@@ -61,7 +64,14 @@ function actionLabel(action: "register" | "resume" | "reenable"): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "DESKTOP_AUTH_FAILED";
+  const message = error instanceof Error ? error.message : "";
+  if (
+    message.includes("auth/api-key-not-valid") ||
+    message.includes("API key not valid")
+  ) {
+    return "Firebase Web API 키가 유효하지 않습니다. Firebase 콘솔에서 Web 앱 키를 확인해 주세요.";
+  }
+  return message || "DESKTOP_AUTH_FAILED";
 }
 
 export interface DesktopAuthBridgeGoogleProps {
@@ -84,6 +94,7 @@ export default function DesktopAuthBridgeGoogle({
     | undefined
   >();
   const callbackNavigated = useRef(false);
+  const signInStarted = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -103,10 +114,10 @@ export default function DesktopAuthBridgeGoogle({
       }
       const redirectResult = await getRedirectResult(bridgeAuth);
       if (!redirectResult) {
-        if (active) {
-          setMessage("");
-          setBusy(false);
-        }
+        if (!active || signInStarted.current) return;
+        signInStarted.current = true;
+        setMessage("");
+        void startGoogleSignIn();
         return;
       }
       const saved = readRedirectState();
@@ -128,15 +139,21 @@ export default function DesktopAuthBridgeGoogle({
         return;
       }
       try {
-        const authorize = httpsCallable(bridgeFunctions, "authorizeDesktopLogin");
-        const response = DesktopLoginInspectResponseSchema.parse(
-          (await authorize({
-            action: "inspect",
-            attemptId: query.attempt,
-            state: query.state,
-          })).data,
+        const authorize = httpsCallable(
+          bridgeFunctions,
+          "authorizeDesktopLogin",
         );
-        if (response.attemptId !== query.attempt) throw new Error("DESKTOP_AUTH_ATTEMPT_INVALID");
+        const response = DesktopLoginInspectResponseSchema.parse(
+          (
+            await authorize({
+              action: "inspect",
+              attemptId: query.attempt,
+              state: query.state,
+            })
+          ).data,
+        );
+        if (response.attemptId !== query.attempt)
+          throw new Error("DESKTOP_AUTH_ATTEMPT_INVALID");
         if (active) {
           setInspection(response);
           setMessage("");
@@ -181,13 +198,18 @@ export default function DesktopAuthBridgeGoogle({
     try {
       const authorize = httpsCallable(bridgeFunctions, "authorizeDesktopLogin");
       const response = DesktopLoginAllowResponseSchema.parse(
-        (await authorize({
-          action: "allow",
-          attemptId: query.attempt,
-          state: query.state,
-        })).data,
+        (
+          await authorize({
+            action: "allow",
+            attemptId: query.attempt,
+            state: query.state,
+          })
+        ).data,
       );
-      if (response.attemptId !== query.attempt || response.state !== query.state)
+      if (
+        response.attemptId !== query.attempt ||
+        response.state !== query.state
+      )
         throw new Error("DESKTOP_AUTH_ALLOW_RESPONSE_INVALID");
       const navigation = createDesktopCallbackNavigation(response.callbackUrl, {
         attempt: response.attemptId,
@@ -215,26 +237,42 @@ export default function DesktopAuthBridgeGoogle({
         <h1 id="desktop-auth-title">데스크톱 호스트 연결</h1>
         {!query ? (
           <p className="message" role="alert">
-            이 로그인 요청은 유효하지 않습니다. CODRA 데스크톱에서 다시 시작해 주세요.
+            이 로그인 요청은 유효하지 않습니다. CODRA 데스크톱에서 다시 시작해
+            주세요.
           </p>
         ) : inspection ? (
           <>
             <p className="muted">
-              <strong>{inspection.displayName}</strong> ({inspection.fingerprintSuffix})을
-              {" "}{actionLabel(inspection.action)}합니다.
+              <strong>{inspection.displayName}</strong> (
+              {inspection.fingerprintSuffix})을 {actionLabel(inspection.action)}
+              합니다.
             </p>
-            <button className="primary-button login-button" onClick={() => void allow()} disabled={busy}>
+            <button
+              className="primary-button login-button"
+              onClick={() => void allow()}
+              disabled={busy}
+            >
               {busy ? "승인 중…" : "이 호스트 허용"}
             </button>
           </>
         ) : (
           <>
             <p className="muted">
-              Google 계정으로 로그인한 뒤, 요청된 데스크톱 호스트를 확인하고 허용하세요.
+              {busy
+                ? "Google 로그인으로 이동 중…"
+                : "Google 로그인에 실패했습니다. 다시 시도해 주세요."}
             </p>
-            <button className="primary-button login-button" onClick={() => void startGoogleSignIn()} disabled={busy}>
-              {busy ? "확인 중…" : "Google로 계속"}
-            </button>
+            {!busy ? (
+              <button
+                className="primary-button login-button"
+                onClick={() => {
+                  signInStarted.current = true;
+                  void startGoogleSignIn();
+                }}
+              >
+                Google 로그인 다시 시도
+              </button>
+            ) : null}
           </>
         )}
         {message ? (

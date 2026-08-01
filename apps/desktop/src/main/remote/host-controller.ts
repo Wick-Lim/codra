@@ -16,7 +16,7 @@ import { signInWithCustomToken } from "firebase/auth";
 import { loadOrCreateHostIdentity, type HostIdentity } from "./host-identity";
 import { bootstrapRemoteAccount } from "@codra/remote-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/remote-firebase-config";
-import { isRemoteStartRequested, remoteErrorStatus } from "./remote-state";
+import { remoteErrorStatus } from "./remote-state";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -51,18 +51,11 @@ export class RemoteHostController {
   }
 
   async login(): Promise<RemoteHostStatus> {
-    await this.start(true);
+    await this.start();
     return this.status;
   }
 
-  async start(force = false): Promise<void> {
-    if (
-      !isRemoteStartRequested({
-        force,
-        envValue: process.env.CODRA_ENABLE_REMOTE,
-      })
-    )
-      return;
+  async start(): Promise<void> {
     if (this.startPromise) return this.startPromise;
     if (this.runtime) return;
     this.stopRequested = false;

@@ -55,16 +55,20 @@ beforeEach(() => {
 
 describe("DesktopAuthBridge", () => {
   it("requires exactly one attempt and state query parameter", () => {
-    expect(parseDesktopAuthQuery(`?attempt=${attempt}&state=${state}`)).toEqual({
-      attempt,
-      state,
-    });
+    expect(parseDesktopAuthQuery(`?attempt=${attempt}&state=${state}`)).toEqual(
+      {
+        attempt,
+        state,
+      },
+    );
     expect(parseDesktopAuthQuery("")).toBeUndefined();
     expect(
       parseDesktopAuthQuery(`?attempt=${attempt}&state=${state}&extra=1`),
     ).toBeUndefined();
     expect(
-      parseDesktopAuthQuery(`?attempt=${attempt}&attempt=${attempt}&state=${state}`),
+      parseDesktopAuthQuery(
+        `?attempt=${attempt}&attempt=${attempt}&state=${state}`,
+      ),
     ).toBeUndefined();
   });
 
@@ -117,8 +121,8 @@ describe("DesktopAuthBridge", () => {
     const replace = vi.fn();
 
     const first = render(<DesktopAuthBridgeGoogle onNavigate={replace} />);
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Google로 계속" }),
+    await waitFor(() =>
+      expect(authMocks.signInWithRedirect).toHaveBeenCalledTimes(1),
     );
     expect(authMocks.signInWithRedirect).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem("codra.desktop-auth.redirect.v1")).toContain(
@@ -133,7 +137,9 @@ describe("DesktopAuthBridge", () => {
       attemptId: attempt,
       state,
     });
-    await userEvent.click(screen.getByRole("button", { name: "이 호스트 허용" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "이 호스트 허용" }),
+    );
     await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
     expect(replace).toHaveBeenCalledWith(
       `http://127.0.0.1:43123/auth/callback?attempt=${attempt}&code=${code}&state=${state}`,
@@ -144,6 +150,5 @@ describe("DesktopAuthBridge", () => {
       state,
     });
     expect(authMocks.signOut).toHaveBeenCalledTimes(1);
-
   });
 });

@@ -176,7 +176,7 @@ const exitedTerminal: TerminalDescriptor = {
 };
 
 describe("TerminalSidebar", () => {
-  it("exposes an explicit Google remote-login action and bounded status", async () => {
+  it("opens a provider menu from the bottom-left account avatar", async () => {
     const onRemoteLogin = vi.fn();
     const { rerender } = render(
       <TerminalSidebar
@@ -187,7 +187,10 @@ describe("TerminalSidebar", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Google로 로그인" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "로그인 계정" }));
+    expect(screen.getByRole("menu", { name: "로그인 제공자" })).toBeVisible();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Google" }));
     expect(onRemoteLogin).toHaveBeenCalledOnce();
 
     rerender(
@@ -199,7 +202,7 @@ describe("TerminalSidebar", () => {
       />,
     );
     expect(screen.getByText("브라우저에서 Google 로그인 중…")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Google로 로그인" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
 
     const online: RemoteHostStatus = { state: "online" };
     rerender(
@@ -790,8 +793,10 @@ describe("App terminal workspace", () => {
 
     render(React.createElement(App));
 
-    await screen.findByRole("button", { name: "Google로 로그인" });
-    await userEvent.click(screen.getByRole("button", { name: "Google로 로그인" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "로그인 계정" }),
+    );
+    await userEvent.click(screen.getByRole("menuitem", { name: "Google" }));
     expect(api.remote.login).toHaveBeenCalledOnce();
   });
 });

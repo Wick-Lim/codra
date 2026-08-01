@@ -25,6 +25,13 @@ export function TerminalSidebar({
   remoteStatus = { state: "idle" },
   onRemoteLogin,
 }: TerminalSidebarProps) {
+  const [providerMenuOpen, setProviderMenuOpen] = React.useState(false);
+
+  function chooseGoogle(): void {
+    setProviderMenuOpen(false);
+    onRemoteLogin?.();
+  }
+
   return (
     <React.Fragment>
       <aside className="terminal-sidebar">
@@ -125,27 +132,49 @@ export function TerminalSidebar({
               원격 연결됨
             </p>
           ) : remoteStatus.state === "error" ? (
-            <React.Fragment>
-              <p className="remote-message" role="alert">
-                {remoteStatus.message ?? "원격 로그인에 실패했습니다."}
-              </p>
-              <button
-                className="remote-login-button"
-                type="button"
-                onClick={onRemoteLogin}
+            <p className="remote-message" role="alert">
+              {remoteStatus.message ?? "원격 로그인에 실패했습니다."}
+            </p>
+          ) : null}
+
+          <div className="remote-account-footer">
+            {providerMenuOpen ? (
+              <div
+                className="remote-provider-menu"
+                role="menu"
+                aria-label="로그인 제공자"
               >
-                다시 로그인
-              </button>
-            </React.Fragment>
-          ) : (
+                <button
+                  className="remote-provider-button"
+                  type="button"
+                  role="menuitem"
+                  onClick={chooseGoogle}
+                >
+                  <span className="remote-provider-icon" aria-hidden="true">
+                    G
+                  </span>
+                  Google
+                </button>
+              </div>
+            ) : null}
             <button
-              className="remote-login-button"
+              className="remote-avatar-button"
               type="button"
-              onClick={onRemoteLogin}
+              aria-label="로그인 계정"
+              aria-expanded={providerMenuOpen}
+              onClick={() => setProviderMenuOpen((open) => !open)}
             >
-              Google로 로그인
+              <span className="remote-avatar" aria-hidden="true">
+                C
+              </span>
+              <span className="remote-avatar-copy">
+                {remoteStatus.state === "online" ? "CODRA 계정" : "로그인"}
+              </span>
+              <span className="remote-avatar-chevron" aria-hidden="true">
+                {providerMenuOpen ? "⌃" : "⌄"}
+              </span>
             </button>
-          )}
+          </div>
         </section>
       </aside>
     </React.Fragment>

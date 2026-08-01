@@ -1,16 +1,6 @@
-import {
-  RemoteHostStatusSchema,
-  type RemoteHostStatus,
-} from "@codra/protocol";
+import { RemoteHostStatusSchema, type RemoteHostStatus } from "@codra/protocol";
 
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,79}$/u;
-
-export function isRemoteStartRequested(options: {
-  force: boolean;
-  envValue: string | undefined;
-}): boolean {
-  return options.force || options.envValue === "1";
-}
 
 export function remoteErrorStatus(error: unknown): RemoteHostStatus {
   const candidate = error instanceof Error ? error.message : "";
