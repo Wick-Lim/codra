@@ -83,8 +83,14 @@ class ResizeObserverFake {
 
 function createPaneApi(
   replay: TerminalOutputChunk[] | Promise<TerminalOutputChunk[]> = [],
-): CodraDesktopApi {
-  return {
+): CodraDesktopApi & {
+  emitOutput(chunk: TerminalOutputChunk): void;
+  readonly outputUnsubscribes: ReturnType<typeof vi.fn>[];
+  activeOutputSubscriptions(): number;
+} {
+  const outputListeners = new Set<(chunk: TerminalOutputChunk) => void>();
+  const outputUnsubscribes: ReturnType<typeof vi.fn>[] = [];
+  const api: CodraDesktopApi = {
     terminal: {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
@@ -92,10 +98,27 @@ function createPaneApi(
       resize: vi.fn().mockResolvedValue(undefined),
       replay: vi.fn().mockResolvedValue(replay),
       close: vi.fn().mockResolvedValue(undefined),
-      onOutput: vi.fn(() => vi.fn()),
+      onOutput: vi.fn((listener) => {
+        outputListeners.add(listener);
+        const unsubscribe = vi.fn(() => {
+          outputListeners.delete(listener);
+        });
+        outputUnsubscribes.push(unsubscribe);
+        return unsubscribe;
+      }),
       onChanged: vi.fn(() => vi.fn()),
     },
   };
+
+  return Object.assign(api, {
+    emitOutput(chunk: TerminalOutputChunk) {
+      for (const listener of [...outputListeners]) listener(chunk);
+    },
+    outputUnsubscribes,
+    activeOutputSubscriptions() {
+      return outputListeners.size;
+    },
+  });
 }
 
 function chunk(
@@ -245,18 +268,19 @@ describe("TerminalPane", () => {
       data: "live\r\n",
     };
     const { rerender } = render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[liveChunk]}
-        api={api}
-      />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
 
+    expect(api.terminal.onOutput).toHaveBeenCalledOnce();
+    expect(
+      vi.mocked(api.terminal.onOutput).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(api.terminal.replay).mock.invocationCallOrder[0]!);
     expect(api.terminal.replay).toHaveBeenCalledWith({
       terminalId: runningTerminal.id,
       afterSequence: 0,
       limit: 1000,
     });
+    act(() => api.emitOutput(liveChunk));
     expect(xtermMocks.terminals[0]?.write).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -285,13 +309,7 @@ describe("TerminalPane", () => {
       sequence: 3,
       data: "done\r\n",
     };
-    rerender(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[liveChunk, thirdChunk]}
-        api={api}
-      />,
-    );
+    act(() => api.emitOutput(thirdChunk));
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenLastCalledWith(
         "done\r\n",
@@ -303,6 +321,13 @@ describe("TerminalPane", () => {
       terminalId: runningTerminal.id,
       data: "pwd\r",
     });
+    rerender(
+      <TerminalPane
+        terminal={{ ...runningTerminal, title: "api — ready" }}
+        api={api}
+      />,
+    );
+    expect(api.terminal.onOutput).toHaveBeenCalledOnce();
   });
 
   it("paginates replay and deduplicates overlapping live output", async () => {
@@ -314,16 +339,11 @@ describe("TerminalPane", () => {
       .mockResolvedValueOnce(firstPage)
       .mockResolvedValueOnce([chunk(1001, "replayed 1001\r\n")]);
 
-    render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[
-          chunk(1001, "live duplicate 1001\r\n"),
-          chunk(1002, "live 1002\r\n"),
-        ]}
-        api={api}
-      />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
+    act(() => {
+      api.emitOutput(chunk(1001, "live duplicate 1001\r\n"));
+      api.emitOutput(chunk(1002, "live 1002\r\n"));
+    });
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledTimes(1002);
@@ -354,30 +374,18 @@ describe("TerminalPane", () => {
 
   it("buffers live sequence gaps until the missing chunk arrives", async () => {
     const api = createPaneApi([chunk(1, "$ ")]);
-    const { rerender } = render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(3, "three\r\n"), chunk(3, "three\r\n")]}
-        api={api}
-      />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
+    act(() => {
+      api.emitOutput(chunk(3, "three\r\n"));
+      api.emitOutput(chunk(3, "duplicate three\r\n"));
+    });
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith("$ ");
     });
     expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([["$ "]]);
 
-    rerender(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[
-          chunk(3, "three\r\n"),
-          chunk(2, "two\r\n"),
-          chunk(3, "three\r\n"),
-        ]}
-        api={api}
-      />,
-    );
+    act(() => api.emitOutput(chunk(2, "two\r\n")));
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([
@@ -388,15 +396,57 @@ describe("TerminalPane", () => {
     });
   });
 
+  it("ignores output for inactive terminals", async () => {
+    const api = createPaneApi();
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      api.emitOutput({
+        terminalId: exitedTerminal.id,
+        sequence: 1,
+        data: "inactive\r\n",
+      });
+      api.emitOutput(chunk(1, "active\r\n"));
+    });
+
+    expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([["active\r\n"]]);
+  });
+
+  it("streams thousands of chunks without React commits or accumulated output props", async () => {
+    const api = createPaneApi();
+    let commits = 0;
+    render(
+      <React.Profiler
+        id="terminal-pane"
+        onRender={() => {
+          commits += 1;
+        }}
+      >
+        <TerminalPane terminal={runningTerminal} api={api} />
+      </React.Profiler>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const commitsBeforeOutput = commits;
+
+    act(() => {
+      for (let sequence = 1; sequence <= 5_000; sequence += 1) {
+        api.emitOutput(chunk(sequence));
+      }
+    });
+
+    expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledTimes(5_000);
+    expect(commits).toBe(commitsBeforeOutput);
+  });
+
   it("uses a compacted replay as the live sequence baseline", async () => {
     const api = createPaneApi([chunk(10, "ten\r\n"), chunk(12, "twelve\r\n")]);
-    render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(13, "thirteen\r\n")]}
-        api={api}
-      />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
+    act(() => api.emitOutput(chunk(13, "thirteen\r\n")));
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write.mock.calls).toEqual([
@@ -412,13 +462,8 @@ describe("TerminalPane", () => {
     vi.mocked(api.terminal.replay).mockRejectedValueOnce(
       new Error("scrollback unavailable"),
     );
-    render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(7, "live seven\r\n")]}
-        api={api}
-      />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
+    act(() => api.emitOutput(chunk(7, "live seven\r\n")));
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith(
@@ -430,21 +475,13 @@ describe("TerminalPane", () => {
   it("renders live output that arrives after initial replay has failed", async () => {
     const failedReplay = deferred<TerminalOutputChunk[]>();
     const api = createPaneApi(failedReplay.promise);
-    const { rerender } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
 
     await act(async () => {
       failedReplay.reject(new Error("scrollback unavailable"));
       await failedReplay.promise.catch(() => undefined);
     });
-    rerender(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(9, "live nine\r\n")]}
-        api={api}
-      />,
-    );
+    act(() => api.emitOutput(chunk(9, "live nine\r\n")));
 
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith(
@@ -462,9 +499,7 @@ describe("TerminalPane", () => {
     vi.mocked(api.terminal.replay)
       .mockResolvedValueOnce(firstPage)
       .mockReturnValueOnce(failedPage.promise);
-    const { rerender } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
-    );
+    render(<TerminalPane terminal={runningTerminal} api={api} />);
     await waitFor(() => {
       expect(api.terminal.replay).toHaveBeenCalledTimes(2);
     });
@@ -475,13 +510,7 @@ describe("TerminalPane", () => {
     });
     expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledTimes(1000);
 
-    rerender(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(1005, "live 1005\r\n")]}
-        api={api}
-      />,
-    );
+    act(() => api.emitOutput(chunk(1005, "live 1005\r\n")));
     await waitFor(() => {
       expect(xtermMocks.terminals[0]?.write).toHaveBeenLastCalledWith(
         "live 1005\r\n",
@@ -501,12 +530,9 @@ describe("TerminalPane", () => {
       return failedPage.promise;
     });
     const { rerender } = render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(1005, "stale live\r\n")]}
-        api={api}
-      />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
+    act(() => api.emitOutput(chunk(1005, "stale live\r\n")));
     const staleXterm = xtermMocks.terminals[0];
     await waitFor(() => {
       expect(api.terminal.replay).toHaveBeenCalledWith({
@@ -516,7 +542,7 @@ describe("TerminalPane", () => {
       });
     });
 
-    rerender(<TerminalPane terminal={exitedTerminal} output={[]} api={api} />);
+    rerender(<TerminalPane terminal={exitedTerminal} api={api} />);
     await act(async () => {
       failedPage.reject(new Error("stale page failed"));
       await failedPage.promise.catch(() => undefined);
@@ -535,12 +561,9 @@ describe("TerminalPane", () => {
       .mockResolvedValueOnce(firstPage)
       .mockReturnValueOnce(failedPage.promise);
     const { unmount } = render(
-      <TerminalPane
-        terminal={runningTerminal}
-        output={[chunk(1005, "stale live\r\n")]}
-        api={api}
-      />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
+    act(() => api.emitOutput(chunk(1005, "stale live\r\n")));
     const staleXterm = xtermMocks.terminals[0];
     await waitFor(() => {
       expect(api.terminal.replay).toHaveBeenCalledTimes(2);
@@ -567,7 +590,7 @@ describe("TerminalPane", () => {
       return stalePage.promise;
     });
     const { rerender } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
     const staleXterm = xtermMocks.terminals[0];
     await waitFor(() => {
@@ -578,7 +601,7 @@ describe("TerminalPane", () => {
       });
     });
 
-    rerender(<TerminalPane terminal={exitedTerminal} output={[]} api={api} />);
+    rerender(<TerminalPane terminal={exitedTerminal} api={api} />);
     await act(async () => {
       stalePage.resolve([chunk(1001)]);
       await stalePage.promise;
@@ -597,7 +620,7 @@ describe("TerminalPane", () => {
       .mockResolvedValueOnce(firstPage)
       .mockReturnValueOnce(stalePage.promise);
     const { unmount } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
     const staleXterm = xtermMocks.terminals[0];
     await waitFor(() => {
@@ -617,16 +640,16 @@ describe("TerminalPane", () => {
     vi.useFakeTimers();
     const api = createPaneApi();
     const { rerender, unmount } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
     const firstXterm = xtermMocks.terminals[0];
     const firstAddon = xtermMocks.addons[0];
     const firstObserver = ResizeObserverFake.instances[0];
+    expect(api.activeOutputSubscriptions()).toBe(1);
 
     rerender(
       <TerminalPane
         terminal={{ ...runningTerminal, title: "api — ready" }}
-        output={[]}
         api={api}
       />,
     );
@@ -643,33 +666,42 @@ describe("TerminalPane", () => {
       rows: 34,
     });
 
-    rerender(<TerminalPane terminal={exitedTerminal} output={[]} api={api} />);
+    rerender(<TerminalPane terminal={exitedTerminal} api={api} />);
     expect(xtermMocks.terminals).toHaveLength(2);
     expect(firstXterm?.inputDispose).toHaveBeenCalledOnce();
     expect(firstXterm?.dispose).toHaveBeenCalledOnce();
     expect(firstAddon?.dispose).toHaveBeenCalledOnce();
     expect(firstObserver?.disconnect).toHaveBeenCalledOnce();
+    expect(api.outputUnsubscribes[0]).toHaveBeenCalledOnce();
+    expect(api.terminal.onOutput).toHaveBeenCalledTimes(2);
+    expect(api.activeOutputSubscriptions()).toBe(1);
 
     const secondXterm = xtermMocks.terminals[1];
     const secondAddon = xtermMocks.addons[1];
     const secondObserver = ResizeObserverFake.instances[1];
+    act(() => api.emitOutput(chunk(1, "stale first terminal\r\n")));
+    expect(secondXterm?.write).not.toHaveBeenCalledWith(
+      "stale first terminal\r\n",
+    );
     unmount();
 
     expect(secondXterm?.dispose).toHaveBeenCalledOnce();
     expect(secondAddon?.dispose).toHaveBeenCalledOnce();
     expect(secondObserver?.disconnect).toHaveBeenCalledOnce();
+    expect(api.outputUnsubscribes[1]).toHaveBeenCalledOnce();
+    expect(api.activeOutputSubscriptions()).toBe(0);
   });
 
   it("labels active and empty terminal stages for assistive technology", () => {
     const api = createPaneApi();
     const { rerender } = render(
-      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+      <TerminalPane terminal={runningTerminal} api={api} />,
     );
     expect(
       screen.getByRole("region", { name: "Terminal api" }),
     ).toHaveAttribute("data-terminal-id", runningTerminal.id);
 
-    rerender(<TerminalPane terminal={null} output={[]} api={api} />);
+    rerender(<TerminalPane terminal={null} api={api} />);
     expect(screen.getByText("Create a terminal to begin.")).toBeVisible();
   });
 });

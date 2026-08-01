@@ -1,15 +1,10 @@
-import type {
-  CodraDesktopApi,
-  TerminalDescriptor,
-  TerminalOutputChunk,
-} from "@codra/protocol";
+import type { CodraDesktopApi, TerminalDescriptor } from "@codra/protocol";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export interface UseTerminalsResult {
   terminals: TerminalDescriptor[];
   activeTerminalId: string | null;
   activeTerminal: TerminalDescriptor | null;
-  output: ReadonlyMap<string, readonly TerminalOutputChunk[]>;
   createTerminal(): Promise<void>;
   selectTerminal(terminalId: string): void;
   closeTerminal(terminalId: string): Promise<void>;
@@ -34,34 +29,11 @@ export function useTerminals(
 ): UseTerminalsResult {
   const [terminals, setTerminals] = useState<TerminalDescriptor[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
-  const [output, setOutput] = useState<
-    ReadonlyMap<string, readonly TerminalOutputChunk[]>
-  >(new Map());
 
   useEffect(() => {
     let mounted = true;
     const changedDuringLoad = new Map<string, TerminalDescriptor>();
 
-    const stopOutput = api.terminal.onOutput((chunk) => {
-      if (!mounted) return;
-      setOutput((current) => {
-        const terminalOutput = current.get(chunk.terminalId) ?? [];
-        if (
-          terminalOutput.some(({ sequence }) => sequence === chunk.sequence)
-        ) {
-          return current;
-        }
-
-        const next = new Map(current);
-        next.set(
-          chunk.terminalId,
-          [...terminalOutput, chunk].sort(
-            (left, right) => left.sequence - right.sequence,
-          ),
-        );
-        return next;
-      });
-    });
     const stopChanged = api.terminal.onChanged((descriptor) => {
       if (!mounted) return;
       changedDuringLoad.set(descriptor.id, descriptor);
@@ -87,7 +59,6 @@ export function useTerminals(
 
     return () => {
       mounted = false;
-      stopOutput();
       stopChanged();
     };
   }, [api]);
@@ -118,7 +89,6 @@ export function useTerminals(
     terminals,
     activeTerminalId,
     activeTerminal,
-    output,
     createTerminal,
     selectTerminal,
     closeTerminal,

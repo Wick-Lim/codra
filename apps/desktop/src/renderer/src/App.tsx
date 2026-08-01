@@ -8,14 +8,10 @@ export default function App() {
     terminals,
     activeTerminalId,
     activeTerminal,
-    output,
     createTerminal,
     selectTerminal,
     closeTerminal,
   } = useTerminals();
-  const activeOutput = activeTerminal
-    ? (output.get(activeTerminal.id) ?? [])
-    : [];
   const stateLabel = activeTerminal
     ? activeTerminal.state === "running"
       ? "Running"
@@ -48,7 +44,7 @@ export default function App() {
                   "Create a terminal to open a local shell"}
               </p>
             </header>
-            <TerminalPane terminal={activeTerminal} output={activeOutput} />
+            <TerminalPane terminal={activeTerminal} />
           </section>
         </div>
 

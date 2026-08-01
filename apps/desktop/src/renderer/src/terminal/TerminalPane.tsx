@@ -10,7 +10,6 @@ import React from "react";
 
 export interface TerminalPaneProps {
   terminal: TerminalDescriptor | null;
-  output: readonly TerminalOutputChunk[];
   api?: CodraDesktopApi;
 }
 
@@ -127,11 +126,9 @@ async function replayAll(
 
 export function TerminalPane({
   terminal,
-  output,
   api = window.codra,
 }: TerminalPaneProps) {
   const hostRef = React.useRef<HTMLDivElement>(null);
-  const runtimeRef = React.useRef<TerminalRuntime | null>(null);
 
   React.useEffect(() => {
     const host = hostRef.current;
@@ -170,8 +167,6 @@ export function TerminalPane({
       fallbackBaselineEstablished: false,
       disposed: false,
     };
-    runtimeRef.current = runtime;
-
     xterm.loadAddon(fitAddon);
     xterm.open(host);
     xterm.focus();
@@ -203,34 +198,31 @@ export function TerminalPane({
     resizeObserver.observe(host);
     scheduleResize();
 
+    const stopOutput = api.terminal.onOutput((chunk) => {
+      if (
+        runtime.disposed ||
+        chunk.terminalId !== runtime.terminalId ||
+        chunk.sequence <= runtime.lastWrittenSequence ||
+        runtime.pendingLive.has(chunk.sequence)
+      ) {
+        return;
+      }
+
+      runtime.pendingLive.set(chunk.sequence, chunk);
+      flushOutput(runtime);
+    });
     void replayAll(runtime, api);
 
     return () => {
       runtime.disposed = true;
+      stopOutput();
       if (resizeTimer !== undefined) clearTimeout(resizeTimer);
       resizeObserver.disconnect();
       input.dispose();
       fitAddon.dispose();
       xterm.dispose();
-      if (runtimeRef.current === runtime) runtimeRef.current = null;
     };
   }, [api, terminal?.id]);
-
-  React.useEffect(() => {
-    const runtime = runtimeRef.current;
-    if (!runtime || runtime.terminalId !== terminal?.id) return;
-
-    for (const chunk of output) {
-      if (
-        chunk.terminalId === runtime.terminalId &&
-        chunk.sequence > runtime.lastWrittenSequence &&
-        !runtime.pendingLive.has(chunk.sequence)
-      ) {
-        runtime.pendingLive.set(chunk.sequence, chunk);
-      }
-    }
-    flushOutput(runtime);
-  }, [output, terminal?.id]);
 
   if (!terminal) {
     return (

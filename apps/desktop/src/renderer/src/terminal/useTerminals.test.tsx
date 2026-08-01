@@ -1,9 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type {
-  CodraDesktopApi,
-  TerminalDescriptor,
-  TerminalOutputChunk,
-} from "@codra/protocol";
+import type { CodraDesktopApi, TerminalDescriptor } from "@codra/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { useTerminals } from "./useTerminals";
 
@@ -28,9 +24,7 @@ const secondTerminal: TerminalDescriptor = {
 };
 
 function createDesktopApiFake() {
-  let outputListener: ((chunk: TerminalOutputChunk) => void) | undefined;
   let changedListener: ((descriptor: TerminalDescriptor) => void) | undefined;
-  const stopOutput = vi.fn();
   const stopChanged = vi.fn();
 
   const api: CodraDesktopApi = {
@@ -41,10 +35,7 @@ function createDesktopApiFake() {
       resize: vi.fn().mockResolvedValue(undefined),
       replay: vi.fn().mockResolvedValue([]),
       close: vi.fn().mockResolvedValue(undefined),
-      onOutput: vi.fn((listener) => {
-        outputListener = listener;
-        return stopOutput;
-      }),
+      onOutput: vi.fn(() => vi.fn()),
       onChanged: vi.fn((listener) => {
         changedListener = listener;
         return stopChanged;
@@ -54,19 +45,15 @@ function createDesktopApiFake() {
 
   return {
     api,
-    emitOutput(chunk: TerminalOutputChunk) {
-      outputListener?.(chunk);
-    },
     emitChanged(descriptor: TerminalDescriptor) {
       changedListener?.(descriptor);
     },
-    stopOutput,
     stopChanged,
   };
 }
 
 describe("useTerminals", () => {
-  it("subscribes before loading and keeps events received during the initial load", async () => {
+  it("keeps descriptor events received during the initial load without subscribing to output", async () => {
     const fake = createDesktopApiFake();
     let finishList: ((terminals: TerminalDescriptor[]) => void) | undefined;
     vi.mocked(fake.api.terminal.list).mockImplementation(
@@ -78,14 +65,9 @@ describe("useTerminals", () => {
 
     const { result } = renderHook(() => useTerminals(fake.api));
 
-    expect(fake.api.terminal.onOutput).toHaveBeenCalledOnce();
+    expect(fake.api.terminal.onOutput).not.toHaveBeenCalled();
     expect(fake.api.terminal.onChanged).toHaveBeenCalledOnce();
     expect(fake.api.terminal.list).toHaveBeenCalledOnce();
-    expect(
-      vi.mocked(fake.api.terminal.onOutput).mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      vi.mocked(fake.api.terminal.list).mock.invocationCallOrder[0]!,
-    );
     expect(
       vi.mocked(fake.api.terminal.onChanged).mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -94,20 +76,13 @@ describe("useTerminals", () => {
 
     act(() => {
       fake.emitChanged({ ...firstTerminal, title: "api — ready" });
-      fake.emitOutput({
-        terminalId: firstTerminal.id,
-        sequence: 1,
-        data: "$ ",
-      });
       finishList?.([firstTerminal]);
     });
 
     await waitFor(() => {
       expect(result.current.terminals[0]?.title).toBe("api — ready");
     });
-    expect(result.current.output.get(firstTerminal.id)).toEqual([
-      { terminalId: firstTerminal.id, sequence: 1, data: "$ " },
-    ]);
+    expect(result.current).not.toHaveProperty("output");
   });
 
   it("selects the first running terminal from the initial load", async () => {
@@ -170,7 +145,7 @@ describe("useTerminals", () => {
     expect(result.current.activeTerminalId).toBe(secondTerminal.id);
   });
 
-  it("replaces changed descriptors and deduplicates output in sequence order", async () => {
+  it("replaces changed descriptors", async () => {
     const fake = createDesktopApiFake();
     vi.mocked(fake.api.terminal.list).mockResolvedValue([firstTerminal]);
     const { result } = renderHook(() => useTerminals(fake.api));
@@ -184,21 +159,6 @@ describe("useTerminals", () => {
         state: "exited",
         exitCode: 143,
       });
-      fake.emitOutput({
-        terminalId: firstTerminal.id,
-        sequence: 2,
-        data: "second",
-      });
-      fake.emitOutput({
-        terminalId: firstTerminal.id,
-        sequence: 1,
-        data: "first",
-      });
-      fake.emitOutput({
-        terminalId: firstTerminal.id,
-        sequence: 2,
-        data: "duplicate",
-      });
     });
 
     expect(result.current.terminals).toEqual([
@@ -210,9 +170,7 @@ describe("useTerminals", () => {
         exitCode: 143,
       },
     ]);
-    expect(
-      result.current.output.get(firstTerminal.id)?.map((chunk) => chunk.data),
-    ).toEqual(["first", "second"]);
+    expect(fake.api.terminal.onOutput).not.toHaveBeenCalled();
   });
 
   it("unsubscribes from terminal events on unmount", () => {
@@ -221,7 +179,6 @@ describe("useTerminals", () => {
 
     unmount();
 
-    expect(fake.stopOutput).toHaveBeenCalledOnce();
     expect(fake.stopChanged).toHaveBeenCalledOnce();
   });
 });
