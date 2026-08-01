@@ -15,6 +15,10 @@ import type {
   TerminalRepository,
 } from "./contracts";
 
+const FINALIZATION_TIMEOUT_MS = 1_000;
+
+export type TerminalErrorReporter = (error: unknown) => void;
+
 export class TerminalError extends Error {
   constructor(readonly code: "TERMINAL_NOT_FOUND") {
     super(code);
@@ -25,11 +29,34 @@ export class TerminalError extends Error {
 interface TerminalSession {
   descriptor: TerminalDescriptor;
   pty?: PtyHandle;
-  unsubscribeData: () => void;
-  unsubscribeExit: () => void;
-  outputQueue: Promise<void>;
+  unsubscribeData?: () => void;
+  unsubscribeExit?: () => void;
+  outputTail: Promise<void>;
+  outputError?: unknown;
+  descriptorTail: Promise<void>;
+  pendingOutput: string[];
+  acceptingInput: boolean;
+  created: boolean;
+  rolledBack: boolean;
+  saveAttempted: boolean;
   closeRequested: boolean;
-  finished: boolean;
+  terminationRequested: boolean;
+  exitResolved: boolean;
+  nativeExitCode?: number;
+  exitPromise: Promise<number>;
+  resolveExit: (exitCode: number) => void;
+  finalizationPromise?: Promise<void>;
+}
+
+function createExitSignal(): Pick<
+  TerminalSession,
+  "exitPromise" | "resolveExit"
+> {
+  let resolveExit!: (exitCode: number) => void;
+  const exitPromise = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  return { exitPromise, resolveExit };
 }
 
 export class TerminalManager {
@@ -45,6 +72,9 @@ export class TerminalManager {
     private readonly ptyFactory: PtyFactory,
     private readonly repository: TerminalRepository,
     private readonly outputStore: TerminalOutputStore,
+    private readonly errorReporter: TerminalErrorReporter = (error) => {
+      console.error("TerminalManager internal error", error);
+    },
   ) {}
 
   async create(request: CreateTerminalRequest): Promise<TerminalDescriptor> {
@@ -59,28 +89,44 @@ export class TerminalManager {
       createdAt: new Date().toISOString(),
     };
     const pty = this.ptyFactory.spawn({ ...request, cwd });
+    const exitSignal = createExitSignal();
     const session: TerminalSession = {
       descriptor,
       pty,
-      unsubscribeData: () => {},
-      unsubscribeExit: () => {},
-      outputQueue: Promise.resolve(),
+      outputTail: Promise.resolve(),
+      descriptorTail: Promise.resolve(),
+      pendingOutput: [],
+      acceptingInput: true,
+      created: false,
+      rolledBack: false,
+      saveAttempted: false,
       closeRequested: false,
-      finished: false,
+      terminationRequested: false,
+      exitResolved: false,
+      ...exitSignal,
     };
-
-    await this.repository.save(descriptor);
     this.sessions.set(descriptor.id, session);
-    session.unsubscribeData = pty.onData((data) => {
-      this.enqueueOutput(session, data);
-    });
-    session.unsubscribeExit = pty.onExit((exitCode) => {
-      void this.finish(session, session.closeRequested ? 0 : exitCode).catch(
-        () => {},
-      );
-    });
-    this.publishChanged(descriptor);
-    return descriptor;
+
+    try {
+      session.unsubscribeExit = pty.onExit((exitCode) => {
+        this.handleExit(session, exitCode);
+      });
+      session.unsubscribeData = pty.onData((data) => {
+        this.handleData(session, data);
+      });
+      session.saveAttempted = true;
+      await this.repository.save(descriptor);
+      session.created = true;
+      for (const data of session.pendingOutput.splice(0)) {
+        this.enqueueOutput(session, data);
+      }
+      this.publishChanged(descriptor);
+      if (session.exitResolved) this.startFinalization(session, false);
+      return descriptor;
+    } catch (error) {
+      await this.rollbackCreation(session, error);
+      throw error;
+    }
   }
 
   async list(): Promise<TerminalDescriptor[]> {
@@ -94,14 +140,16 @@ export class TerminalManager {
   async resize(request: ResizeTerminalRequest): Promise<void> {
     const session = this.getActiveSession(request.terminalId);
     session.pty?.resize(request.cols, request.rows);
-    const descriptor = {
-      ...session.descriptor,
-      cols: request.cols,
-      rows: request.rows,
-    };
-    session.descriptor = descriptor;
-    await this.repository.update(descriptor);
-    this.publishChanged(descriptor);
+    await this.enqueueDescriptorTransition(session, async () => {
+      const descriptor: TerminalDescriptor = {
+        ...session.descriptor,
+        cols: request.cols,
+        rows: request.rows,
+      };
+      await this.repository.update(descriptor);
+      session.descriptor = descriptor;
+      this.publishChanged(descriptor);
+    });
   }
 
   async replay(request: ReplayTerminalRequest): Promise<TerminalOutputChunk[]> {
@@ -114,18 +162,14 @@ export class TerminalManager {
   }
 
   async close(terminalId: string): Promise<void> {
-    const session = this.getSession(terminalId);
-    if (session.finished) return;
-    session.closeRequested = true;
-    session.pty?.kill();
-    await this.finish(session, 0);
+    return this.startFinalization(this.getSession(terminalId), true);
   }
 
   async closeAll(): Promise<void> {
     await Promise.all(
-      [...this.sessions.values()]
-        .filter((session) => !session.finished)
-        .map((session) => this.close(session.descriptor.id)),
+      [...this.sessions.values()].map((session) =>
+        this.startFinalization(session, true),
+      ),
     );
   }
 
@@ -147,48 +191,212 @@ export class TerminalManager {
 
   private getActiveSession(terminalId: string): TerminalSession {
     const session = this.getSession(terminalId);
-    if (session.finished || !session.pty) {
+    if (!session.acceptingInput || !session.pty) {
       throw new TerminalError("TERMINAL_NOT_FOUND");
     }
     return session;
   }
 
-  private enqueueOutput(session: TerminalSession, data: string): void {
-    session.outputQueue = session.outputQueue
-      .then(async () => {
-        const chunk = await this.outputStore.append(
-          session.descriptor.id,
-          data,
-        );
-        this.publishOutput(chunk);
-      })
-      .catch(() => {});
+  private handleData(session: TerminalSession, data: string): void {
+    if (session.rolledBack) return;
+    if (!session.created) {
+      session.pendingOutput.push(data);
+      return;
+    }
+    this.enqueueOutput(session, data);
   }
 
-  private async finish(
+  private handleExit(session: TerminalSession, exitCode: number): void {
+    if (session.rolledBack || session.exitResolved) return;
+    session.exitResolved = true;
+    session.nativeExitCode = exitCode;
+    session.resolveExit(exitCode);
+    if (session.created) this.startFinalization(session, false);
+  }
+
+  private enqueueOutput(session: TerminalSession, data: string): void {
+    const operation = session.outputTail.then(async () => {
+      const chunk = await this.outputStore.append(session.descriptor.id, data);
+      this.publishOutput(chunk);
+    });
+    operation.catch((error: unknown) => {
+      session.outputError ??= error;
+      this.report(error);
+    });
+    session.outputTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+
+  private enqueueDescriptorTransition<T>(
     session: TerminalSession,
-    exitCode: number,
+    transition: () => Promise<T>,
+  ): Promise<T> {
+    const operation = session.descriptorTail.then(transition);
+    operation.catch((error: unknown) => this.report(error));
+    session.descriptorTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+
+  private startFinalization(
+    session: TerminalSession,
+    requestTermination: boolean,
   ): Promise<void> {
-    if (session.finished) return;
-    session.finished = true;
-    session.unsubscribeData();
-    session.unsubscribeExit();
+    session.acceptingInput = false;
+    if (requestTermination) session.closeRequested = true;
+    if (session.finalizationPromise) return session.finalizationPromise;
+
+    let resolveFinalization!: () => void;
+    let rejectFinalization!: (error: unknown) => void;
+    const finalizationPromise = new Promise<void>((resolve, reject) => {
+      resolveFinalization = resolve;
+      rejectFinalization = reject;
+    });
+    session.finalizationPromise = finalizationPromise;
+    finalizationPromise.catch((error: unknown) => this.report(error));
+    void this.runFinalization(session).then(
+      resolveFinalization,
+      rejectFinalization,
+    );
+    return finalizationPromise;
+  }
+
+  private async runFinalization(session: TerminalSession): Promise<void> {
+    let lifecycleError: unknown;
+    if (session.closeRequested && !session.terminationRequested) {
+      session.terminationRequested = true;
+      try {
+        session.pty?.kill();
+      } catch (error) {
+        lifecycleError = error;
+        this.report(error);
+      }
+    }
+
+    const nativeExitCode = await this.waitForNativeExit(session);
+    const dataDisposalError = this.disposeListener(session.unsubscribeData);
+    const exitDisposalError = this.disposeListener(session.unsubscribeExit);
+    lifecycleError ??= dataDisposalError;
+    lifecycleError ??= exitDisposalError;
+    session.unsubscribeData = undefined;
+    session.unsubscribeExit = undefined;
+    await session.outputTail;
+
+    let descriptorError: unknown;
+    try {
+      await this.enqueueDescriptorTransition(session, async () => {
+        const descriptor: TerminalDescriptor = {
+          ...session.descriptor,
+          state: "exited",
+          exitCode: session.closeRequested ? 0 : (nativeExitCode ?? -1),
+        };
+        await this.repository.update(descriptor);
+        session.descriptor = descriptor;
+        this.publishChanged(descriptor);
+      });
+    } catch (error) {
+      descriptorError = error;
+    } finally {
+      session.pty = undefined;
+    }
+
+    if (descriptorError !== undefined) throw descriptorError;
+    if (session.outputError !== undefined) throw session.outputError;
+    if (lifecycleError !== undefined) throw lifecycleError;
+  }
+
+  private async waitForNativeExit(
+    session: TerminalSession,
+  ): Promise<number | undefined> {
+    if (session.exitResolved) return session.nativeExitCode;
+    let timeout: number | NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        session.exitPromise,
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(resolve, FINALIZATION_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  private async rollbackCreation(
+    session: TerminalSession,
+    cause: unknown,
+  ): Promise<void> {
+    this.report(cause);
+    session.rolledBack = true;
+    session.acceptingInput = false;
+    session.pendingOutput.length = 0;
+    this.sessions.delete(session.descriptor.id);
+    this.disposeListener(session.unsubscribeData);
+    this.disposeListener(session.unsubscribeExit);
+    session.unsubscribeData = undefined;
+    session.unsubscribeExit = undefined;
+    try {
+      session.pty?.kill();
+    } catch (error) {
+      this.report(error);
+    }
     session.pty = undefined;
-    const descriptor: TerminalDescriptor = {
-      ...session.descriptor,
-      state: "exited",
-      exitCode,
-    };
-    session.descriptor = descriptor;
-    await this.repository.update(descriptor);
-    this.publishChanged(descriptor);
+
+    if (session.saveAttempted) {
+      const descriptor: TerminalDescriptor = {
+        ...session.descriptor,
+        state: "exited",
+        exitCode: -1,
+      };
+      try {
+        await this.repository.update(descriptor);
+      } catch (error) {
+        this.report(error);
+      }
+    }
+  }
+
+  private disposeListener(unsubscribe?: () => void): unknown {
+    if (!unsubscribe) return undefined;
+    try {
+      unsubscribe();
+      return undefined;
+    } catch (error) {
+      this.report(error);
+      return error;
+    }
   }
 
   private publishOutput(chunk: TerminalOutputChunk): void {
-    for (const listener of this.outputListeners) listener(chunk);
+    this.publishTo(this.outputListeners, chunk);
   }
 
   private publishChanged(descriptor: TerminalDescriptor): void {
-    for (const listener of this.changedListeners) listener(descriptor);
+    this.publishTo(this.changedListeners, descriptor);
+  }
+
+  private publishTo<T>(listeners: Set<(value: T) => void>, value: T): void {
+    for (const listener of listeners) {
+      try {
+        const result = (listener as (value: T) => unknown)(value);
+        if (result instanceof Promise) {
+          result.catch((error: unknown) => this.report(error));
+        }
+      } catch (error) {
+        this.report(error);
+      }
+    }
+  }
+
+  private report(error: unknown): void {
+    try {
+      this.errorReporter(error);
+    } catch (reporterError) {
+      console.error("TerminalManager error reporter failed", reporterError);
+    }
   }
 }

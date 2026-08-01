@@ -13,11 +13,33 @@ import type {
 } from "./contracts";
 import { TerminalError, TerminalManager } from "./manager";
 
+interface Deferred<T = void> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+function createDeferred<T = void>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 class FakePty implements PtyHandle {
   readonly pid = 42;
   readonly writes: string[] = [];
   readonly sizes: Array<[number, number]> = [];
   kills = 0;
+  exitOnKill = true;
+  dataOnSubscribe?: string;
+  exitOnSubscribe?: number;
+  dataRegistrationError?: Error;
+  exitRegistrationError?: Error;
+  dataDisposalError?: Error;
+  exitDisposalError?: Error;
+  dataDisposals = 0;
+  exitDisposals = 0;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(exitCode: number) => void>();
 
@@ -31,16 +53,29 @@ class FakePty implements PtyHandle {
 
   kill(): void {
     this.kills += 1;
+    if (this.exitOnKill) this.emitExit(0);
   }
 
   onData(listener: (data: string) => void): () => void {
+    if (this.dataRegistrationError) throw this.dataRegistrationError;
     this.dataListeners.add(listener);
-    return () => this.dataListeners.delete(listener);
+    if (this.dataOnSubscribe !== undefined) listener(this.dataOnSubscribe);
+    return () => {
+      this.dataDisposals += 1;
+      this.dataListeners.delete(listener);
+      if (this.dataDisposalError) throw this.dataDisposalError;
+    };
   }
 
   onExit(listener: (exitCode: number) => void): () => void {
+    if (this.exitRegistrationError) throw this.exitRegistrationError;
     this.exitListeners.add(listener);
-    return () => this.exitListeners.delete(listener);
+    if (this.exitOnSubscribe !== undefined) listener(this.exitOnSubscribe);
+    return () => {
+      this.exitDisposals += 1;
+      this.exitListeners.delete(listener);
+      if (this.exitDisposalError) throw this.exitDisposalError;
+    };
   }
 
   emitData(data: string): void {
@@ -58,13 +93,35 @@ class FakePty implements PtyHandle {
 
 class MemoryRepository implements TerminalRepository {
   readonly descriptors = new Map<string, TerminalDescriptor>();
+  readonly saves: TerminalDescriptor[] = [];
+  readonly updates: TerminalDescriptor[] = [];
+  saveError?: Error;
+  persistBeforeSaveError = false;
+  updateError?: Error;
+  private nextUpdateGate?: Deferred;
+  private nextUpdateStarted?: Deferred;
 
   async save(descriptor: TerminalDescriptor): Promise<void> {
+    this.saves.push(descriptor);
+    if (this.persistBeforeSaveError) {
+      this.descriptors.set(descriptor.id, descriptor);
+    }
+    if (this.saveError) throw this.saveError;
     this.descriptors.set(descriptor.id, descriptor);
   }
 
   async update(descriptor: TerminalDescriptor): Promise<void> {
-    this.descriptors.set(descriptor.id, descriptor);
+    this.updates.push(descriptor);
+    const gate = this.nextUpdateGate;
+    const started = this.nextUpdateStarted;
+    this.nextUpdateGate = undefined;
+    this.nextUpdateStarted = undefined;
+    started?.resolve();
+    await gate?.promise;
+    if (this.updateError) throw this.updateError;
+    if (this.descriptors.has(descriptor.id)) {
+      this.descriptors.set(descriptor.id, descriptor);
+    }
   }
 
   async list(): Promise<TerminalDescriptor[]> {
@@ -72,13 +129,23 @@ class MemoryRepository implements TerminalRepository {
   }
 
   async markRunningExited(): Promise<void> {}
+
+  delayNextUpdate(): { started: Promise<void>; release(): void } {
+    const gate = createDeferred();
+    const started = createDeferred();
+    this.nextUpdateGate = gate;
+    this.nextUpdateStarted = started;
+    return { started: started.promise, release: () => gate.resolve() };
+  }
 }
 
 class MemoryOutputStore implements TerminalOutputStore {
   readonly chunks: TerminalOutputChunk[] = [];
   private readonly appendWaiters: Array<() => void> = [];
+  private readonly appendAttemptWaiters: Array<() => void> = [];
   private nextSequence = 1;
   private appendGate: Promise<void> | undefined;
+  appendError?: Error;
 
   delayAppends(): { release(): void } {
     let release!: () => void;
@@ -94,7 +161,9 @@ class MemoryOutputStore implements TerminalOutputStore {
   }
 
   async append(terminalId: string, data: string): Promise<TerminalOutputChunk> {
+    this.appendAttemptWaiters.splice(0).forEach((resolve) => resolve());
     await this.appendGate;
+    if (this.appendError) throw this.appendError;
     const chunk = { terminalId, sequence: this.nextSequence++, data };
     this.chunks.push(chunk);
     this.appendWaiters.splice(0).forEach((resolve) => resolve());
@@ -120,25 +189,52 @@ class MemoryOutputStore implements TerminalOutputStore {
     if (this.chunks.length > 0) return;
     await new Promise<void>((resolve) => this.appendWaiters.push(resolve));
   }
+
+  async whenAppendAttempted(): Promise<void> {
+    await new Promise<void>((resolve) =>
+      this.appendAttemptWaiters.push(resolve),
+    );
+  }
 }
 
-function createHarness() {
-  const pty = new FakePty();
-  const repository = new MemoryRepository();
-  const outputStore = new MemoryOutputStore();
+function createHarness(options?: {
+  pty?: FakePty;
+  repository?: MemoryRepository;
+  outputStore?: MemoryOutputStore;
+  reporter?: (error: unknown) => void;
+}) {
+  const pty = options?.pty ?? new FakePty();
+  const repository = options?.repository ?? new MemoryRepository();
+  const outputStore = options?.outputStore ?? new MemoryOutputStore();
+  const reporter = options?.reporter ?? vi.fn();
   const factory: PtyFactory = { spawn: vi.fn(() => pty) };
-  const manager = new TerminalManager(factory, repository, outputStore);
+  const manager = new TerminalManager(
+    factory,
+    repository,
+    outputStore,
+    reporter,
+  );
   const published: TerminalOutputChunk[] = [];
   const changed: TerminalDescriptor[] = [];
   manager.onOutput((chunk) => published.push(chunk));
   manager.onChanged((descriptor) => changed.push(descriptor));
-  return { manager, pty, repository, outputStore, published, changed, factory };
+  return {
+    manager,
+    pty,
+    repository,
+    outputStore,
+    published,
+    changed,
+    factory,
+    reporter,
+  };
 }
 
 const request: CreateTerminalRequest = { cols: 80, rows: 24 };
 
 describe("TerminalManager", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
@@ -161,6 +257,67 @@ describe("TerminalManager", () => {
       state: "running",
     });
     expect(changed).toEqual([terminal]);
+  });
+
+  it("rolls back a partially persisted descriptor when save fails", async () => {
+    const repository = new MemoryRepository();
+    const saveError = new Error("save failed after commit");
+    repository.saveError = saveError;
+    repository.persistBeforeSaveError = true;
+    const { manager, pty, reporter } = createHarness({ repository });
+
+    await expect(manager.create(request)).rejects.toBe(saveError);
+
+    const descriptor = [...repository.descriptors.values()][0];
+    expect(descriptor).toMatchObject({ state: "exited", exitCode: -1 });
+    expect(pty.kills).toBe(1);
+    expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
+    await expect(manager.close(descriptor.id)).rejects.toMatchObject({
+      code: "TERMINAL_NOT_FOUND",
+    });
+    expect(reporter).toHaveBeenCalledWith(saveError);
+  });
+
+  it("disposes the exit listener and child when data registration fails", async () => {
+    const pty = new FakePty();
+    const registrationError = new Error("data registration failed");
+    pty.dataRegistrationError = registrationError;
+    const { manager, repository, reporter } = createHarness({ pty });
+
+    await expect(manager.create(request)).rejects.toBe(registrationError);
+
+    expect(repository.saves).toHaveLength(0);
+    expect(pty.kills).toBe(1);
+    expect(pty.exitDisposals).toBe(1);
+    expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
+    expect(reporter).toHaveBeenCalledWith(registrationError);
+  });
+
+  it("kills the child and removes map state when exit registration fails", async () => {
+    const pty = new FakePty();
+    const registrationError = new Error("exit registration failed");
+    pty.exitRegistrationError = registrationError;
+    const { manager, repository, reporter } = createHarness({ pty });
+
+    await expect(manager.create(request)).rejects.toBe(registrationError);
+
+    expect(repository.saves).toHaveLength(0);
+    expect(pty.kills).toBe(1);
+    expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
+    expect(reporter).toHaveBeenCalledWith(registrationError);
+  });
+
+  it("captures output emitted synchronously while listeners are installed", async () => {
+    const pty = new FakePty();
+    pty.dataOnSubscribe = "early output";
+    const { manager, outputStore } = createHarness({ pty });
+
+    const terminal = await manager.create(request);
+    await outputStore.whenAppended();
+
+    expect(outputStore.chunks).toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "early output" },
+    ]);
   });
 
   it("persists output before publishing it", async () => {
@@ -189,6 +346,58 @@ describe("TerminalManager", () => {
       { terminalId: terminal.id, sequence: 1, data: "one" },
       { terminalId: terminal.id, sequence: 2, data: "two" },
     ]);
+  });
+
+  it("reports output failures and makes close observe them", async () => {
+    const outputStore = new MemoryOutputStore();
+    const appendError = new Error("append failed");
+    outputStore.appendError = appendError;
+    const { manager, pty, repository, reporter } = createHarness({
+      outputStore,
+    });
+    const terminal = await manager.create(request);
+
+    pty.emitData("lost");
+    await outputStore.whenAppendAttempted();
+
+    await expect(manager.close(terminal.id)).rejects.toBe(appendError);
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+    });
+    expect(reporter).toHaveBeenCalledWith(appendError);
+  });
+
+  it("isolates throwing and rejecting subscribers from other subscribers", async () => {
+    const reporter = vi.fn();
+    const { manager, pty, outputStore } = createHarness({ reporter });
+    const changed: TerminalDescriptor[] = [];
+    const output: TerminalOutputChunk[] = [];
+    const syncError = new Error("sync subscriber failed");
+    const asyncError = new Error("async subscriber failed");
+    manager.onChanged(() => {
+      throw syncError;
+    });
+    manager.onChanged(async () => {
+      throw asyncError;
+    });
+    manager.onChanged((descriptor) => changed.push(descriptor));
+    manager.onOutput(() => {
+      throw syncError;
+    });
+    manager.onOutput((chunk) => output.push(chunk));
+
+    const terminal = await manager.create(request);
+    pty.emitData("visible");
+    await outputStore.whenAppended();
+
+    expect(changed).toEqual([terminal]);
+    expect(output).toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "visible" },
+    ]);
+    await vi.waitFor(() => {
+      expect(reporter).toHaveBeenCalledWith(syncError);
+      expect(reporter).toHaveBeenCalledWith(asyncError);
+    });
   });
 
   it("routes validated input and resize to the selected PTY", async () => {
@@ -264,8 +473,165 @@ describe("TerminalManager", () => {
     ).toHaveLength(1);
   });
 
+  it("waits for delayed output persistence before publishing exit", async () => {
+    const { manager, pty, repository, outputStore, published, changed } =
+      createHarness();
+    const terminal = await manager.create(request);
+    const gate = outputStore.delayAppends();
+    pty.emitData("tail");
+    await outputStore.whenAppendAttempted();
+    let settled = false;
+
+    const closing = manager.close(terminal.id).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(repository.descriptors.get(terminal.id)?.state).toBe("running");
+    expect(published).toEqual([]);
+    gate.release();
+    await closing;
+    expect(published).toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "tail" },
+    ]);
+    expect(changed.at(-1)).toMatchObject({ state: "exited" });
+  });
+
+  it("waits for a delayed native exit and accepts trailing output", async () => {
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, outputStore, repository } = createHarness({ pty });
+    const terminal = await manager.create(request);
+    let settled = false;
+
+    const closing = manager.close(terminal.id).then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    pty.emitData("after kill");
+    await outputStore.whenAppended();
+
+    expect(pty.kills).toBe(1);
+    expect(settled).toBe(false);
+    pty.emitExit(143);
+    await closing;
+    expect(outputStore.chunks).toEqual([
+      { terminalId: terminal.id, sequence: 1, data: "after kill" },
+    ]);
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      exitCode: 0,
+    });
+  });
+
+  it("uses a bounded fallback when a killed PTY never emits exit", async () => {
+    vi.useFakeTimers();
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager, repository } = createHarness({ pty });
+    const terminal = await manager.create(request);
+
+    const closing = manager.close(terminal.id);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    await expect(closing).resolves.toBeUndefined();
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      exitCode: 0,
+    });
+  });
+
+  it("serializes a delayed resize before finalization", async () => {
+    const repository = new MemoryRepository();
+    const { manager, changed } = createHarness({ repository });
+    const terminal = await manager.create(request);
+    const gate = repository.delayNextUpdate();
+
+    const resizing = manager.resize({
+      terminalId: terminal.id,
+      cols: 120,
+      rows: 40,
+    });
+    await gate.started;
+    const closing = manager.close(terminal.id);
+    await Promise.resolve();
+
+    expect(changed).toEqual([terminal]);
+    gate.release();
+    await Promise.all([resizing, closing]);
+
+    expect(repository.updates.map(({ state }) => state)).toEqual([
+      "running",
+      "exited",
+    ]);
+    expect(changed.map(({ state }) => state)).toEqual([
+      "running",
+      "running",
+      "exited",
+    ]);
+    expect(repository.descriptors.get(terminal.id)).toMatchObject({
+      state: "exited",
+      cols: 120,
+      rows: 40,
+    });
+  });
+
+  it("shares finalization failures with every concurrent close caller", async () => {
+    const repository = new MemoryRepository();
+    const updateError = new Error("exit update failed");
+    repository.updateError = updateError;
+    const { manager, pty, reporter } = createHarness({ repository });
+    const terminal = await manager.create(request);
+
+    const results = await Promise.allSettled([
+      manager.close(terminal.id),
+      manager.close(terminal.id),
+    ]);
+
+    expect(results).toEqual([
+      { status: "rejected", reason: updateError },
+      { status: "rejected", reason: updateError },
+    ]);
+    expect(pty.kills).toBe(1);
+    expect(repository.updates).toHaveLength(1);
+    expect(reporter).toHaveBeenCalledWith(updateError);
+  });
+
+  it("attempts every listener cleanup when one disposer throws", async () => {
+    const pty = new FakePty();
+    const disposalError = new Error("data dispose failed");
+    pty.dataDisposalError = disposalError;
+    const { manager, reporter } = createHarness({ pty });
+    const terminal = await manager.create(request);
+
+    await expect(manager.close(terminal.id)).rejects.toBe(disposalError);
+
+    expect(pty.dataDisposals).toBe(1);
+    expect(pty.exitDisposals).toBe(1);
+    expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
+    expect(reporter).toHaveBeenCalledWith(disposalError);
+  });
+
   it("closes every active terminal", async () => {
-    const { manager, pty } = createHarness();
+    const firstPty = new FakePty();
+    const secondPty = new FakePty();
+    const repository = new MemoryRepository();
+    const outputStore = new MemoryOutputStore();
+    const handles = [firstPty, secondPty];
+    const factory: PtyFactory = {
+      spawn: () => {
+        const handle = handles.shift();
+        if (!handle) throw new Error("No fake PTY available");
+        return handle;
+      },
+    };
+    const manager = new TerminalManager(
+      factory,
+      repository,
+      outputStore,
+      vi.fn(),
+    );
     const first = await manager.create(request);
     const second = await manager.create({ cols: 90, rows: 30 });
 
@@ -277,6 +643,25 @@ describe("TerminalManager", () => {
         expect.objectContaining({ id: second.id, state: "exited" }),
       ]),
     );
-    expect(pty.kills).toBe(2);
+    expect(firstPty.kills).toBe(1);
+    expect(secondPty.kills).toBe(1);
+  });
+
+  it("makes closeAll wait for delayed finalization", async () => {
+    const pty = new FakePty();
+    pty.exitOnKill = false;
+    const { manager } = createHarness({ pty });
+    await manager.create(request);
+    let settled = false;
+
+    const closing = manager.closeAll().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    pty.emitExit(0);
+    await closing;
+    expect(settled).toBe(true);
   });
 });
