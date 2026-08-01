@@ -4,5 +4,9 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/renderer/src/**/*", "test/setup.ts"]
+  "include": [
+    "src/renderer/src/**/*",
+    "src/preload/global.d.ts",
+    "test/setup.ts"
+  ]
 }

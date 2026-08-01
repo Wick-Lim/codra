@@ -86,6 +86,98 @@ describe("createDesktopApi", () => {
     ]);
   });
 
+  it.each([
+    {
+      label: "create",
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.create({ cols: 19, rows: 32 }),
+    },
+    {
+      label: "write",
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.write({ terminalId, data: "" }),
+    },
+    {
+      label: "resize",
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.resize({ terminalId, cols: 19, rows: 32 }),
+    },
+    {
+      label: "replay",
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.replay({ terminalId, afterSequence: -1, limit: 100 }),
+    },
+    {
+      label: "close",
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.close("not-a-terminal-id"),
+    },
+  ])(
+    "rejects invalid $label requests before invoking IPC",
+    async ({ invoke }) => {
+      const ipc = new FakeIpcRenderer();
+
+      await expect(invoke(createDesktopApi(ipc))).rejects.toThrow();
+
+      expect(ipc.invocations).toEqual([]);
+    },
+  );
+
+  it.each([
+    {
+      label: "list",
+      channel: IPC_CHANNELS.terminalList,
+      response: [{ ...descriptor, cols: 2 }],
+      invoke: (api: ReturnType<typeof createDesktopApi>) => api.terminal.list(),
+    },
+    {
+      label: "create",
+      channel: IPC_CHANNELS.terminalCreate,
+      response: { ...descriptor, cols: 2 },
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.create({ cols: 120, rows: 32 }),
+    },
+    {
+      label: "replay",
+      channel: IPC_CHANNELS.terminalReplay,
+      response: [{ terminalId, sequence: 0, data: "bad" }],
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.replay({ terminalId, afterSequence: 0, limit: 100 }),
+    },
+  ])(
+    "rejects malformed $label responses",
+    async ({ channel, response, invoke }) => {
+      const ipc = new FakeIpcRenderer(new Map([[channel, response]]));
+
+      await expect(invoke(createDesktopApi(ipc))).rejects.toThrow();
+    },
+  );
+
+  it.each([
+    {
+      label: "write",
+      channel: IPC_CHANNELS.terminalWrite,
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.write({ terminalId, data: "pwd\n" }),
+    },
+    {
+      label: "resize",
+      channel: IPC_CHANNELS.terminalResize,
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.resize({ terminalId, cols: 100, rows: 30 }),
+    },
+    {
+      label: "close",
+      channel: IPC_CHANNELS.terminalClose,
+      invoke: (api: ReturnType<typeof createDesktopApi>) =>
+        api.terminal.close(terminalId),
+    },
+  ])("rejects non-undefined $label responses", async ({ channel, invoke }) => {
+    const ipc = new FakeIpcRenderer(new Map([[channel, "unexpected"]]));
+
+    await expect(invoke(createDesktopApi(ipc))).rejects.toThrow();
+  });
+
   it("forwards only valid output events", () => {
     const ipc = new FakeIpcRenderer();
     const received: string[] = [];
@@ -124,6 +216,21 @@ describe("createDesktopApi", () => {
 
     expect(first).toEqual([]);
     expect(second).toEqual(["still here"]);
+  });
+
+  it("unsubscribes only its terminal change listener wrapper", () => {
+    const ipc = new FakeIpcRenderer();
+    const api = createDesktopApi(ipc);
+    const first: TerminalDescriptor[] = [];
+    const second: TerminalDescriptor[] = [];
+    const stopFirst = api.terminal.onChanged((change) => first.push(change));
+    api.terminal.onChanged((change) => second.push(change));
+
+    stopFirst();
+    ipc.emit(IPC_CHANNELS.terminalChanged, descriptor);
+
+    expect(first).toEqual([]);
+    expect(second).toEqual([descriptor]);
   });
 
   it("forwards only valid terminal change events", () => {

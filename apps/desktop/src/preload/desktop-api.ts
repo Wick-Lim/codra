@@ -18,6 +18,14 @@ export interface IpcRendererLike {
   removeListener(channel: string, listener: IpcListener): void;
 }
 
+function assertUndefinedResponse(
+  response: unknown,
+): asserts response is undefined {
+  if (response !== undefined) {
+    throw new TypeError("Expected IPC mutation response to be undefined");
+  }
+}
+
 export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
   return {
     terminal: {
@@ -35,15 +43,19 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
         );
       },
       async write(request) {
-        await ipc.invoke(
-          IPC_CHANNELS.terminalWrite,
-          WriteTerminalRequestSchema.parse(request),
+        assertUndefinedResponse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalWrite,
+            WriteTerminalRequestSchema.parse(request),
+          ),
         );
       },
       async resize(request) {
-        await ipc.invoke(
-          IPC_CHANNELS.terminalResize,
-          ResizeTerminalRequestSchema.parse(request),
+        assertUndefinedResponse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalResize,
+            ResizeTerminalRequestSchema.parse(request),
+          ),
         );
       },
       async replay(request) {
@@ -55,9 +67,11 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
         );
       },
       async close(terminalId) {
-        await ipc.invoke(
-          IPC_CHANNELS.terminalClose,
-          TerminalIdSchema.parse(terminalId),
+        assertUndefinedResponse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalClose,
+            TerminalIdSchema.parse(terminalId),
+          ),
         );
       },
       onOutput(listener) {
