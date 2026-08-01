@@ -17,6 +17,7 @@ export type { OutputFrame } from "./terminal-frame";
 export {
   CODRA_PROJECT_ID,
   BRIDGE_FIREBASE_APP_ID,
+  DESKTOP_APPCHECK_FIREBASE_APP_ID,
   ProductionDeploymentConfigSchema,
   createProductionDeployment,
   productionPublicConfig,

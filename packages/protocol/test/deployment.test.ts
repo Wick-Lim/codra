@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_APPCHECK_FIREBASE_APP_ID,
   EmulatorDeploymentConfigSchema,
   ProductionDeploymentConfigSchema,
   createProductionDeployment,
@@ -9,11 +10,13 @@ import {
 describe("deployment contracts", () => {
   it("freezes the real Firebase production project and bridge", () => {
     const productionDeployment = createProductionDeployment({
-      desktopAppCheckFirebaseAppId:
-        "1:92715578857:web:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      desktopAppCheckFirebaseAppId: DESKTOP_APPCHECK_FIREBASE_APP_ID,
       operatorApproved: true,
     });
     expect(productionDeployment.projectId).toBe("codra-1b3bb");
+    expect(DESKTOP_APPCHECK_FIREBASE_APP_ID).toBe(
+      productionDeployment.desktopAppCheckFirebaseAppId,
+    );
     expect(productionDeployment.browserOrigins).toEqual([
       "https://codra-1b3bb.web.app",
       "https://codra-1b3bb.firebaseapp.com",

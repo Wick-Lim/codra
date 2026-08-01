@@ -5,6 +5,8 @@ export const CODRA_PROJECT_ID = "codra-1b3bb" as const;
 export const DEMO_PROJECT_ID = "demo-codra" as const;
 export const BRIDGE_FIREBASE_APP_ID =
   "1:92715578857:web:6c07f26a4866a1d4d3c778" as const;
+export const DESKTOP_APPCHECK_FIREBASE_APP_ID =
+  "1:92715578857:web:f955949d45ca300ed3c778" as const;
 
 const httpsOrigin = z
   .string()

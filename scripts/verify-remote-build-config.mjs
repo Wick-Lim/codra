@@ -140,6 +140,7 @@ assert.deepEqual(firebaseConfig.emulators.hosting, {
 });
 assert.deepEqual(firebaseConfig.hosting.rewrites, [
   { source: "/desktop-auth", destination: "/index.html" },
+  { source: "/login", destination: "/index.html" },
 ]);
 
 for (const script of [

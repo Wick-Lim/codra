@@ -1,6 +1,7 @@
 import {
   BRIDGE_FIREBASE_APP_ID,
   CODRA_PROJECT_ID,
+  DESKTOP_APPCHECK_FIREBASE_APP_ID,
   FUNCTION_REGION,
   ProductionDeploymentConfigSchema,
   createProductionDeployment,
@@ -12,6 +13,7 @@ import {
 export {
   BRIDGE_FIREBASE_APP_ID,
   CODRA_PROJECT_ID,
+  DESKTOP_APPCHECK_FIREBASE_APP_ID,
   FUNCTION_REGION,
   ProductionDeploymentConfigSchema,
   productionPublicConfig,
