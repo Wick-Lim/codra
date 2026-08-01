@@ -132,7 +132,15 @@ export function parseDesktopLoginCallback(
   // from the CODRA transaction state, which is checked when authorizing the
   // Firestore transaction and again during token redemption.
   const requiredKeys = ["code", "state"];
-  const allowedKeys = ["code", "state", "scope", "authuser", "hd", "prompt"];
+  const allowedKeys = [
+    "code",
+    "state",
+    "iss",
+    "scope",
+    "authuser",
+    "hd",
+    "prompt",
+  ];
   const keys = [...url.searchParams.keys()];
   if (
     keys.length < requiredKeys.length ||

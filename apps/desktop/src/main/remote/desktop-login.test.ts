@@ -164,7 +164,7 @@ describe("desktop login loopback", () => {
     const valid = {
       method: "GET",
       headers: { host: "127.0.0.1:43123" },
-      url: `/auth/callback?code=${code}&state=${state}&scope=openid%20email&authuser=0&prompt=consent`,
+      url: `/auth/callback?code=${code}&state=${state}&iss=https%3A%2F%2Faccounts.google.com&scope=openid%20email&authuser=0&prompt=consent`,
     };
 
     expect(parseDesktopLoginCallback(valid, expected)).toEqual({
