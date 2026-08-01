@@ -21,6 +21,53 @@ button {
   margin: 0 auto;
   padding: 48px 0 56px;
 }
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+.login-card {
+  width: min(100%, 520px);
+  border: 1px solid #2d4160;
+  border-radius: 24px;
+  padding: 42px;
+  background: linear-gradient(
+    145deg,
+    rgba(35, 63, 97, 0.9),
+    rgba(19, 29, 52, 0.92)
+  );
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 32px;
+  border-radius: 15px;
+  background: #a5e8c4;
+  color: #0c1b1c;
+  font-size: 24px;
+  font-weight: 800;
+}
+.login-card h1 {
+  font-size: clamp(32px, 6vw, 52px);
+  margin-bottom: 18px;
+}
+.login-card .muted {
+  margin-bottom: 28px;
+}
+.login-button {
+  width: 100%;
+}
+.login-hint {
+  color: #8295b5;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 14px 0 0;
+  text-align: center;
+}
 .topbar,
 .panel-heading,
 .host-row,
@@ -66,6 +113,28 @@ h3 {
   color: #c9d8f2;
   font-size: 13px;
   white-space: nowrap;
+}
+.account-actions {
+  display: grid;
+  justify-items: end;
+  gap: 9px;
+}
+.account-menu {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #9bb1d1;
+  font-size: 12px;
+}
+.text-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #a5e8c4;
+  font-size: 12px;
+}
+.text-button:hover:not(:disabled) {
+  text-decoration: underline;
 }
 .status-dot {
   width: 8px;
@@ -209,6 +278,12 @@ button:disabled {
   .hero-card {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .account-actions {
+    justify-items: start;
+  }
+  .login-card {
+    padding: 30px 24px;
   }
   .hero-card {
     margin-top: 30px;

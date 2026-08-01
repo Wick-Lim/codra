@@ -1,11 +1,56 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { subscribeClientSessions } from "@codra/firebase";
 import type { RemoteDevice, RemoteSession } from "@codra/protocol";
+import { webAccountBootstrap } from "@codra/web-account-bootstrap";
 import {
   BrowserRemoteController,
   type BrowserRemoteState,
 } from "./remote/controller";
 import "./styles.css";
+
+function LoginScreen({
+  busy,
+  message,
+  onLogin,
+}: {
+  busy: boolean;
+  message: string;
+  onLogin: () => void;
+}): ReactElement {
+  const testOnly = webAccountBootstrap === "password-test-only";
+  return (
+    <main className="login-shell">
+      <section className="login-card" aria-labelledby="login-title">
+        <div className="brand-mark">C</div>
+        <p className="eyebrow">CODRA / REMOTE CONSOLE</p>
+        <h1 id="login-title">내 터미널에 안전하게 접속하세요.</h1>
+        <p className="muted">
+          로그인하면 같은 계정으로 등록된 CODRA 데스크톱 호스트를 확인하고,
+          승인된 연결만 WebRTC로 시작할 수 있습니다.
+        </p>
+        <button
+          className="primary-button login-button"
+          onClick={onLogin}
+          disabled={busy}
+        >
+          {busy
+            ? "로그인 중…"
+            : testOnly
+              ? "테스트 계정으로 로그인"
+              : "Google로 로그인"}
+        </button>
+        <p className="login-hint">
+          {testOnly
+            ? "이 빌드는 로컬 Firebase Emulator 전용입니다."
+            : "Google 계정으로 로그인하며 비밀번호는 CODRA가 보관하지 않습니다."}
+        </p>
+        <p className="message" role="alert">
+          {message}
+        </p>
+      </section>
+    </main>
+  );
+}
 
 function sessionLabel(session: RemoteSession): string {
   if (session.status === "requested") return "승인 대기 중";
@@ -19,6 +64,7 @@ function sessionLabel(session: RemoteSession): string {
 
 function App(): ReactElement {
   const controller = useMemo(() => new BrowserRemoteController(), []);
+  const [path, setPath] = useState(() => window.location.pathname);
   const [state, setState] = useState<BrowserRemoteState>();
   const [hosts, setHosts] = useState<RemoteDevice[]>([]);
   const [sessions, setSessions] = useState<RemoteSession[]>([]);
@@ -26,6 +72,18 @@ function App(): ReactElement {
   const [message, setMessage] = useState(
     "로그인하면 같은 계정의 CODRA 호스트를 찾습니다.",
   );
+
+  useEffect(() => {
+    const onPopState = (): void => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (state || path === "/login") return;
+    window.history.replaceState({}, "", "/login");
+    setPath("/login");
+  }, [path, state]);
 
   useEffect(() => {
     if (!state) return;
@@ -48,6 +106,8 @@ function App(): ReactElement {
       setState(connected);
       setHosts(await controller.listHosts());
       setMessage("호스트 목록을 불러왔습니다.");
+      window.history.replaceState({}, "", "/");
+      setPath("/");
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : "로그인에 실패했습니다.",
@@ -73,6 +133,35 @@ function App(): ReactElement {
     }
   }
 
+  async function logout(): Promise<void> {
+    setBusy(true);
+    try {
+      await controller.signOut();
+      setState(undefined);
+      setHosts([]);
+      setSessions([]);
+      setMessage("로그아웃했습니다.");
+      window.history.replaceState({}, "", "/login");
+      setPath("/login");
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "로그아웃에 실패했습니다.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!state) {
+    return (
+      <LoginScreen
+        busy={busy}
+        message={message}
+        onLogin={() => void connect()}
+      />
+    );
+  }
+
   return (
     <main className="shell">
       <header className="topbar">
@@ -80,9 +169,23 @@ function App(): ReactElement {
           <p className="eyebrow">CODRA / REMOTE CONSOLE</p>
           <h1>작업 중인 터미널에 안전하게 접속하세요.</h1>
         </div>
-        <div className="status-pill">
-          <span className="status-dot" />
-          {state ? "계정 연결됨" : "로그인 필요"}
+        <div className="account-actions">
+          <div className="status-pill">
+            <span className="status-dot" />
+            계정 연결됨
+          </div>
+          <div className="account-menu">
+            <span>
+              {state.account.email ?? state.account.displayName ?? "CODRA 계정"}
+            </span>
+            <button
+              className="text-button"
+              onClick={() => void logout()}
+              disabled={busy}
+            >
+              로그아웃
+            </button>
+          </div>
         </div>
       </header>
 
@@ -100,7 +203,7 @@ function App(): ReactElement {
           onClick={() => void connect()}
           disabled={busy}
         >
-          {busy ? "처리 중…" : state ? "호스트 새로고침" : "Google로 로그인"}
+          {busy ? "처리 중…" : "호스트 새로고침"}
         </button>
       </section>
 

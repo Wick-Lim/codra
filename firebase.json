@@ -12,6 +12,10 @@
       {
         "source": "/desktop-auth",
         "destination": "/index.html"
+      },
+      {
+        "source": "/login",
+        "destination": "/index.html"
       }
     ]
   },

@@ -15,7 +15,11 @@ import {
   type RemoteSession,
   type SessionRequest,
 } from "@codra/protocol";
-import { signInWithCustomToken } from "firebase/auth";
+import {
+  getIdTokenResult,
+  signInWithCustomToken,
+  signOut as firebaseSignOut,
+} from "firebase/auth";
 import { bootstrapRemoteAccount } from "@codra/web-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/web-firebase-config";
 import {
@@ -36,18 +40,38 @@ export interface BrowserRemoteState {
   runtime: FirebaseRuntime;
   identity: BrowserDeviceIdentity;
   device: RemoteDevice;
+  account: {
+    uid: string;
+    email: string | null;
+    displayName: string | null;
+  };
 }
 
 export class BrowserRemoteController {
   private state: BrowserRemoteState | undefined;
+  private runtime: FirebaseRuntime | undefined;
 
   async connect(): Promise<BrowserRemoteState> {
     if (this.state) return this.state;
     const runtime = createRemoteFirebaseRuntime();
-    const credential = await bootstrapRemoteAccount(runtime);
+    this.runtime = runtime;
+    const currentUser = runtime.auth.currentUser;
+    let account = currentUser;
+    if (currentUser) {
+      const token = await getIdTokenResult(currentUser);
+      const acceptedProvider =
+        token.signInProvider === "google.com" ||
+        (runtime.deployment.mode === "emulator" &&
+          token.signInProvider === "password");
+      if (!acceptedProvider) {
+        await firebaseSignOut(runtime.auth);
+        account = null;
+      }
+    }
+    account ??= (await bootstrapRemoteAccount(runtime)).user;
     const identity = await bindBrowserDeviceOwner(
       await loadOrCreateBrowserDeviceIdentity(),
-      credential.user.uid,
+      account.uid,
     );
     const registered = await registerDevice(runtime.functions, {
       action: identity.created ? "register" : "resume",
@@ -61,7 +85,16 @@ export class BrowserRemoteController {
     });
     await signInWithCustomToken(runtime.auth, registered.token);
     const device = RemoteDeviceSchema.parse(registered.device);
-    this.state = { runtime, identity, device };
+    this.state = {
+      runtime,
+      identity,
+      device,
+      account: {
+        uid: account.uid,
+        email: account.email,
+        displayName: account.displayName,
+      },
+    };
     return this.state;
   }
 
@@ -122,6 +155,13 @@ export class BrowserRemoteController {
 
   disconnect(): void {
     this.state = undefined;
+  }
+
+  async signOut(): Promise<void> {
+    const auth = this.state?.runtime.auth ?? this.runtime?.auth;
+    this.state = undefined;
+    this.runtime = undefined;
+    if (auth) await firebaseSignOut(auth);
   }
 }
 
