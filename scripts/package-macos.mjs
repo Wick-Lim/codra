@@ -14,6 +14,8 @@ const repositoryRoot = path.resolve(
 const desktopDirectory = path.join(repositoryRoot, "apps", "desktop");
 const distDirectory = path.join(desktopDirectory, "dist");
 const provenancePath = path.join(distDirectory, "package-provenance.json");
+const pendingSmokePath = path.join(distDirectory, "package-smoke.pending.json");
+const passedSmokePath = path.join(distDirectory, "package-smoke.passed.json");
 const hostArchivePath = path.join(distDirectory, "CODRA-host.app.tar.gz");
 const release = process.argv.includes("--release");
 
@@ -27,7 +29,13 @@ if (!release && process.arch !== "arm64" && process.arch !== "x64") {
 const hostOutputName = process.arch === "arm64" ? "mac-arm64" : "mac";
 const outputPaths = release
   ? [distDirectory]
-  : [path.join(distDirectory, hostOutputName), provenancePath, hostArchivePath];
+  : [
+      path.join(distDirectory, hostOutputName),
+      provenancePath,
+      pendingSmokePath,
+      passedSmokePath,
+      hostArchivePath,
+    ];
 
 async function cleanOutputs() {
   for (const outputPath of outputPaths) {
@@ -80,6 +88,18 @@ try {
     "--publish",
     "never",
   ]);
+  if (!release) {
+    const pendingReceipt = {
+      provenanceId: provenance.id,
+      nonce: randomUUID(),
+      commit: provenance.commit,
+      arch: provenance.arch,
+    };
+    await writeFile(
+      pendingSmokePath,
+      `${JSON.stringify(pendingReceipt, null, 2)}\n`,
+    );
+  }
 } catch (error) {
   await cleanOutputs();
   throw error;

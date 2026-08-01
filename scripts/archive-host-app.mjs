@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -11,6 +11,9 @@ const repositoryRoot = path.resolve(
 );
 const distDirectory = path.join(repositoryRoot, "apps", "desktop", "dist");
 const archivePath = path.join(distDirectory, "CODRA-host.app.tar.gz");
+const provenancePath = path.join(distDirectory, "package-provenance.json");
+const pendingSmokePath = path.join(distDirectory, "package-smoke.pending.json");
+const passedSmokePath = path.join(distDirectory, "package-smoke.passed.json");
 
 if (process.platform !== "darwin") {
   throw new Error("macOS app archiving requires darwin");
@@ -63,6 +66,38 @@ async function requireMode0755(filePath) {
   }
 }
 
+async function pathExists(filePath) {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function readJson(filePath) {
+  return JSON.parse(await readFile(filePath, "utf8"));
+}
+
+await rm(archivePath, { force: true });
+if (await pathExists(pendingSmokePath)) {
+  throw new Error("Packaged smoke is still pending");
+}
+const provenance = await readJson(provenancePath);
+const passedReceipt = await readJson(passedSmokePath);
+if (
+  passedReceipt.provenanceId !== provenance.id ||
+  passedReceipt.commit !== provenance.commit ||
+  passedReceipt.arch !== provenance.arch ||
+  typeof passedReceipt.nonce !== "string" ||
+  !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+    passedReceipt.nonce,
+  )
+) {
+  throw new Error("Packaged smoke receipt does not match provenance");
+}
+
 if (!(await stat(appPath)).isDirectory()) {
   throw new Error(`Exact host CODRA.app is missing: ${appPath}`);
 }
@@ -72,7 +107,6 @@ await requireMode0755(path.join(hostOutputPath, helperRelativePath));
 const extractionPath = await mkdtemp(
   path.join(tmpdir(), "codra-archive-check-"),
 );
-await rm(archivePath, { force: true });
 try {
   await runTar(["-C", hostOutputPath, "-czf", archivePath, "CODRA.app"]);
   await runTar(["-C", extractionPath, "-xzf", archivePath]);

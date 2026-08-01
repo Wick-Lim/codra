@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { _electron as electron } from "playwright";
-import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdtemp, readFile, rename, rm, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -14,6 +14,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const desktopDist = path.resolve("apps/desktop/dist");
+const archiveScriptPath = path.resolve("scripts/archive-host-app.mjs");
 const completedMarker = "__CODRA_PACKAGED_SMOKE__";
 
 interface PackageProvenance {
@@ -21,6 +22,13 @@ interface PackageProvenance {
   commit: string;
   arch: string;
   createdAt: string;
+}
+
+interface SmokeReceipt {
+  provenanceId: string;
+  nonce: string;
+  commit: string;
+  arch: string;
 }
 
 function hostPackagingPaths() {
@@ -36,6 +44,9 @@ function hostPackagingPaths() {
     appPath,
     executablePath: path.join(appPath, "Contents", "MacOS", "CODRA"),
     externalProvenancePath: path.join(desktopDist, "package-provenance.json"),
+    archivePath: path.join(desktopDist, "CODRA-host.app.tar.gz"),
+    pendingSmokePath: path.join(desktopDist, "package-smoke.pending.json"),
+    passedSmokePath: path.join(desktopDist, "package-smoke.passed.json"),
     packagedProvenancePath: path.join(resourcesPath, "package-provenance.json"),
     selectedHelperPath: path.join(
       resourcesPath,
@@ -59,6 +70,20 @@ function hostPackagingPaths() {
 
 async function readProvenance(filePath: string): Promise<PackageProvenance> {
   return JSON.parse(await readFile(filePath, "utf8")) as PackageProvenance;
+}
+
+async function readReceipt(filePath: string): Promise<SmokeReceipt> {
+  return JSON.parse(await readFile(filePath, "utf8")) as SmokeReceipt;
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function fileDescription(filePath: string): Promise<string> {
@@ -86,7 +111,9 @@ test("packaged CODRA proves current host natives and reaps its real shell", asyn
     const packagedProvenance = await readProvenance(
       paths.packagedProvenancePath,
     );
+    const pendingReceipt = await readReceipt(paths.pendingSmokePath);
     expect(packagedProvenance).toEqual(externalProvenance);
+    expect(await pathExists(paths.passedSmokePath)).toBe(false);
     expect(externalProvenance.arch).toBe(process.arch);
     expect(externalProvenance.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
@@ -96,6 +123,17 @@ test("packaged CODRA proves current host natives and reaps its real shell", asyn
       "HEAD",
     ]);
     expect(externalProvenance.commit).toBe(currentCommit.trim());
+    expect(pendingReceipt.provenanceId).toBe(externalProvenance.id);
+    expect(pendingReceipt.commit).toBe(externalProvenance.commit);
+    expect(pendingReceipt.arch).toBe(externalProvenance.arch);
+    expect(pendingReceipt.nonce).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    await rm(paths.archivePath, { force: true });
+    await expect(
+      execFileAsync(process.execPath, [archiveScriptPath]),
+    ).rejects.toMatchObject({ code: 1 });
+    expect(await pathExists(paths.archivePath)).toBe(false);
 
     const expectedMachArch = process.arch === "arm64" ? "arm64" : "x86_64";
     await expect(fileDescription(paths.executablePath)).resolves.toContain(
@@ -179,4 +217,6 @@ test("packaged CODRA proves current host natives and reaps its real shell", asyn
       await rm(userDataDir, { recursive: true, force: true });
     }
   }
+
+  await rename(paths.pendingSmokePath, paths.passedSmokePath);
 });
