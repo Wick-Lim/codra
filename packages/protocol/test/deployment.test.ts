@@ -14,6 +14,9 @@ describe("deployment contracts", () => {
       operatorApproved: true,
     });
     expect(productionDeployment.projectId).toBe("codra-1b3bb");
+    expect(productionDeployment.publicConfig.apiKey).toBe(
+      "AIzaSyDqVsIBxX09Gv3WQJSgvE51uU4DfJU4x2o",
+    );
     expect(DESKTOP_APPCHECK_FIREBASE_APP_ID).toBe(
       productionDeployment.desktopAppCheckFirebaseAppId,
     );

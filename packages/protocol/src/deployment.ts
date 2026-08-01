@@ -98,7 +98,7 @@ export interface ApprovedDesktopAppCheckInput {
 export function createProductionDeployment(
   input: ApprovedDesktopAppCheckInput,
   publicConfig: ProductionDeploymentConfig["publicConfig"] = {
-    apiKey: "AIzaSyDqVsIBxX09Gv3WQJSgvE51U4DfJU4x2o",
+    apiKey: "AIzaSyDqVsIBxX09Gv3WQJSgvE51uU4DfJU4x2o",
     authDomain: "codra-1b3bb.firebaseapp.com",
     projectId: CODRA_PROJECT_ID,
     storageBucket: "codra-1b3bb.firebasestorage.app",
@@ -145,7 +145,7 @@ export const emulatorDeployment: EmulatorDeploymentConfig = {
 };
 
 export const productionPublicConfig = {
-  apiKey: "AIzaSyDqVsIBxX09Gv3WQJSgvE51U4DfJU4x2o",
+  apiKey: "AIzaSyDqVsIBxX09Gv3WQJSgvE51uU4DfJU4x2o",
   authDomain: "codra-1b3bb.firebaseapp.com",
   projectId: CODRA_PROJECT_ID,
   storageBucket: "codra-1b3bb.firebasestorage.app",
