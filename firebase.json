@@ -1,4 +1,18 @@
 {
+  "auth": {
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "CODRA",
+        "supportEmail": "wicklim90@gmail.com",
+        "authorizedRedirectUris": [
+          "http://127.0.0.1",
+          "https://codra-1b3bb.firebaseapp.com/__/auth/handler",
+          "https://codra-1b3bb.web.app/__/auth/handler"
+        ]
+      }
+    }
+  },
   "functions": {
     "source": "functions-deploy-build"
   },

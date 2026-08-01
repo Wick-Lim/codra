@@ -27,6 +27,7 @@ import {
 import type { HostIdentity } from "./host-identity";
 
 const CALLBACK_PATH = "/auth/callback" as const;
+export const DESKTOP_LOGIN_CALLBACK_PORT = 45831 as const;
 const IDENTITY_TOOLKIT_ORIGIN = "https://identitytoolkit.googleapis.com";
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const CANCEL_TIMEOUT_MS = 1_000;
@@ -61,6 +62,14 @@ export interface DesktopLoginGoogleAuthUriRequest {
     sessionId: string;
     context: string;
   };
+}
+
+export interface DesktopLoginGoogleAuthExchangeRequest {
+  requestUri: string;
+  postBody: string;
+  sessionId: string;
+  returnSecureToken: true;
+  returnIdpCredential: true;
 }
 
 export interface DesktopLoginCallbackListener {
@@ -100,7 +109,7 @@ function hasUnexpectedRequestBody(request: CallbackRequest): boolean {
 
 /**
  * This is deliberately strict: only the exact top-level redirect emitted by
- * the Hosting bridge is allowed to complete a local sign-in attempt.
+ * Google OAuth is allowed to complete a local sign-in attempt.
  */
 export function parseDesktopLoginCallback(
   request: CallbackRequest,
@@ -119,28 +128,33 @@ export function parseDesktopLoginCallback(
     return undefined;
   }
   if (url.pathname !== CALLBACK_PATH) return undefined;
-  const expectedKeys = ["attempt", "code", "state"];
+  // Identity Toolkit creates the OAuth state used by Google. It is different
+  // from the CODRA transaction state, which is checked when authorizing the
+  // Firestore transaction and again during token redemption.
+  const requiredKeys = ["code", "state"];
+  const allowedKeys = ["code", "state", "scope", "authuser", "hd", "prompt"];
   const keys = [...url.searchParams.keys()];
   if (
-    keys.length !== expectedKeys.length ||
-    keys.some((key) => !expectedKeys.includes(key)) ||
-    expectedKeys.some((key) => url.searchParams.getAll(key).length !== 1)
+    keys.length < requiredKeys.length ||
+    keys.some((key) => !allowedKeys.includes(key)) ||
+    allowedKeys.some((key) => url.searchParams.getAll(key).length > 1) ||
+    requiredKeys.some((key) => url.searchParams.getAll(key).length !== 1)
   ) {
     return undefined;
   }
-  const attemptId = url.searchParams.get("attempt");
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   if (
-    attemptId !== expected.attemptId ||
-    state !== expected.state ||
     typeof code !== "string" ||
     code.length < 1 ||
-    code.length > 4_096
+    code.length > 4_096 ||
+    typeof state !== "string" ||
+    state.length < 1 ||
+    state.length > 4_096
   ) {
     return undefined;
   }
-  return { attemptId, code, state };
+  return { attemptId: expected.attemptId, code, state };
 }
 
 function sendLoopbackError(response: ServerResponse, status: number): void {
@@ -167,6 +181,7 @@ export async function createDesktopLoginCallbackListener(options: {
   attemptId: string;
   state: string;
   timeoutMs?: number;
+  port?: number;
 }): Promise<DesktopLoginCallbackListener> {
   const sockets = new Set<Socket>();
   let port = 0;
@@ -246,7 +261,7 @@ export async function createDesktopLoginCallbackListener(options: {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(0, "127.0.0.1");
+    server.listen(options.port ?? DESKTOP_LOGIN_CALLBACK_PORT, "127.0.0.1");
   });
   timeout = setTimeout(() => {
     rejectAndClose(new Error("DESKTOP_LOGIN_TIMEOUT"));
@@ -284,6 +299,22 @@ export function createDesktopLoginGoogleAuthUriRequest(
       sessionId: state,
       context: state,
     },
+  };
+}
+
+export function createDesktopLoginGoogleAuthExchangeRequest(
+  requestUri: string,
+  sessionId: string,
+  code: string,
+  state: string,
+): DesktopLoginGoogleAuthExchangeRequest {
+  const postBody = new URLSearchParams({ code, state }).toString();
+  return {
+    requestUri,
+    postBody,
+    sessionId,
+    returnSecureToken: true,
+    returnIdpCredential: true,
   };
 }
 
@@ -333,6 +364,8 @@ async function completeDesktopLoginGoogleAuth(
   dependencies: DesktopLoginDependencies,
   callbackUrl: string,
   sessionId: string,
+  code: string,
+  state: string,
   signal?: AbortSignal,
 ): Promise<void> {
   const url = new URL("/v1/accounts:signInWithIdp", IDENTITY_TOOLKIT_ORIGIN);
@@ -342,12 +375,12 @@ async function completeDesktopLoginGoogleAuth(
   const response = await postDesktopLoginJson(
     dependencies,
     url.toString(),
-    {
-      requestUri: callbackUrl,
+    createDesktopLoginGoogleAuthExchangeRequest(
+      callbackUrl,
       sessionId,
-      returnSecureToken: true,
-      returnIdpCredential: true,
-    },
+      code,
+      state,
+    ),
     signal,
   );
   if (!response || typeof response !== "object")
@@ -500,7 +533,6 @@ export async function bootstrapProductionDesktopLogin(
     const callbackUrl = new URL(
       `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`,
     );
-    callbackUrl.searchParams.set("attempt", attemptId);
     const googleAuthUri = await bounded(
       createDesktopLoginGoogleAuthUri(
         runtime,
@@ -514,15 +546,14 @@ export async function bootstrapProductionDesktopLogin(
     const callbackOutcome = await bounded(callbackResult);
     if ("error" in callbackOutcome) throw callbackOutcome.error;
     const callback = callbackOutcome.value;
-    const callbackRequestUri = new URL(callbackUrl);
-    callbackRequestUri.searchParams.set("code", callback.code);
-    callbackRequestUri.searchParams.set("state", callback.state);
     await bounded(
       completeDesktopLoginGoogleAuth(
         runtime,
         dependencies,
-        callbackRequestUri.toString(),
+        callbackUrl.toString(),
         state,
+        callback.code,
+        callback.state,
         abort.signal,
       ),
     );
@@ -533,7 +564,7 @@ export async function bootstrapProductionDesktopLogin(
           authorize({
             action: "allow",
             attemptId: callback.attemptId,
-            state: callback.state,
+            state,
           }),
         )
       ).data,

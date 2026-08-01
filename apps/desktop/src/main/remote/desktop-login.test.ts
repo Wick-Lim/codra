@@ -12,7 +12,9 @@ import {
 import {
   bootstrapProductionDesktopLogin,
   createDesktopLoginCallbackListener,
+  createDesktopLoginGoogleAuthExchangeRequest,
   createDesktopLoginGoogleAuthUriRequest,
+  DESKTOP_LOGIN_CALLBACK_PORT,
   desktopLoginFunctionUrl,
   parseDesktopLoginCallback,
 } from "./desktop-login";
@@ -101,18 +103,36 @@ describe("desktop login loopback", () => {
     expect(
       createDesktopLoginGoogleAuthUriRequest(
         productionRuntime(),
-        `http://127.0.0.1:43123/auth/callback?attempt=${attemptId}`,
+        "http://127.0.0.1:43123/auth/callback",
         state,
       ),
     ).toEqual({
       url: "https://identitytoolkit.googleapis.com/v1/accounts:createAuthUri?key=key",
       body: {
         providerId: "google.com",
-        continueUri: `http://127.0.0.1:43123/auth/callback?attempt=${attemptId}`,
+        continueUri: "http://127.0.0.1:43123/auth/callback",
         authFlowType: "CODE_FLOW",
         sessionId: state,
         context: state,
       },
+    });
+  });
+
+  it("exchanges the Google callback as the Identity Toolkit POST body", () => {
+    expect(
+      createDesktopLoginGoogleAuthExchangeRequest(
+        "http://127.0.0.1:45831/auth/callback",
+        state,
+        code,
+        "opaque-google-state",
+      ),
+    ).toEqual({
+      requestUri: "http://127.0.0.1:45831/auth/callback",
+      postBody:
+        "code=" + encodeURIComponent(code) + "&state=opaque-google-state",
+      sessionId: state,
+      returnSecureToken: true,
+      returnIdpCredential: true,
     });
   });
 
@@ -139,12 +159,12 @@ describe("desktop login loopback", () => {
     );
   });
 
-  it("accepts only the exact method, host, path, and three callback keys", () => {
+  it("accepts Google OAuth callback metadata while requiring code and state", () => {
     const expected = { port: 43123, attemptId, state };
     const valid = {
       method: "GET",
       headers: { host: "127.0.0.1:43123" },
-      url: `/auth/callback?attempt=${attemptId}&code=${code}&state=${state}`,
+      url: `/auth/callback?code=${code}&state=${state}&scope=openid%20email&authuser=0&prompt=consent`,
     };
 
     expect(parseDesktopLoginCallback(valid, expected)).toEqual({
@@ -175,15 +195,9 @@ describe("desktop login loopback", () => {
     ).toBeUndefined();
     expect(
       parseDesktopLoginCallback(
-        { ...valid, url: valid.url.replace(state, code) },
-        expected,
-      ),
-    ).toBeUndefined();
-    expect(
-      parseDesktopLoginCallback(
         {
           ...valid,
-          url: `/auth/callback?attempt=${attemptId}&attempt=${attemptId}&code=${code}&state=${state}`,
+          url: `/auth/callback?code=${code}&code=${code}&state=${state}`,
         },
         expected,
       ),
@@ -192,31 +206,45 @@ describe("desktop login loopback", () => {
       parseDesktopLoginCallback(
         {
           ...valid,
-          url: `/auth/callback?attempt=${attemptId}&code=${code}&state=${state}${"x".repeat(4_096)}`,
+          url: `/auth/callback?code=${code}&state=${"x".repeat(4_097)}`,
         },
         expected,
       ),
     ).toBeUndefined();
+    expect(
+      parseDesktopLoginCallback(
+        { ...valid, url: `/auth/callback?code=${code}&state=` },
+        expected,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("binds the stable loopback callback to the pending attempt without a redirect query", () => {
+    expect(
+      parseDesktopLoginCallback(
+        {
+          method: "GET",
+          headers: { host: "127.0.0.1:45831" },
+          url: `/auth/callback?code=${code}&state=${state}`,
+        },
+        { port: 45831, attemptId, state },
+      ),
+    ).toEqual({ attemptId, code, state });
   });
 
   it("keeps invalid traffic from consuming the attempt and accepts the first valid callback", async () => {
     const listener = await createDesktopLoginCallbackListener({
       attemptId,
       state,
+      port: 0,
     });
     const invalid = await request(
-      callbackTarget(
-        listener.port,
-        `?attempt=${attemptId}&code=${code}&state=${state}&extra=1`,
-      ),
+      callbackTarget(listener.port, `?code=${code}&state=${state}&extra=1`),
     );
     expect(invalid).toBe(400);
 
     const valid = request(
-      callbackTarget(
-        listener.port,
-        `?attempt=${attemptId}&code=${code}&state=${state}`,
-      ),
+      callbackTarget(listener.port, `?code=${code}&state=${state}`),
     );
     await expect(listener.waitForCallback()).resolves.toEqual({
       attemptId,
@@ -224,6 +252,15 @@ describe("desktop login loopback", () => {
       state,
     });
     expect(await valid).toBe(200);
+    await listener.close();
+  });
+
+  it("uses the registered production loopback port by default", async () => {
+    const listener = await createDesktopLoginCallbackListener({
+      attemptId,
+      state,
+    });
+    expect(listener.port).toBe(DESKTOP_LOGIN_CALLBACK_PORT);
     await listener.close();
   });
 
