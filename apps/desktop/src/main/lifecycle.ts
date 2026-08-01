@@ -1,4 +1,5 @@
 import type { TerminalDescriptor } from "@codra/protocol";
+import type { TerminalRequestAdmission } from "./ipc/admission";
 
 export interface DesktopAppLike {
   quit(): void;
@@ -18,10 +19,11 @@ export interface DesktopLifecycleOptions {
   manager: DesktopLifecycleManager;
   platform: NodeJS.Platform;
   getWindowCount(): number;
-  createWindow(): void;
+  createWindow(): void | Promise<void>;
   confirmQuit(activeTerminals: readonly TerminalDescriptor[]): Promise<boolean>;
   closeDatabase(): void | Promise<void>;
   unregisterIpc(): void | Promise<void>;
+  admission: TerminalRequestAdmission;
   reportError?(error: unknown): void;
 }
 
@@ -44,7 +46,15 @@ export class DesktopLifecycle {
   }
 
   onActivate(): void {
-    if (this.options.getWindowCount() === 0) this.options.createWindow();
+    if (this.options.getWindowCount() !== 0) return;
+    try {
+      const windowCreation = this.options.createWindow();
+      if (windowCreation instanceof Promise) {
+        void windowCreation.catch((error: unknown) => this.report(error));
+      }
+    } catch (error) {
+      this.report(error);
+    }
   }
 
   async onBeforeQuit(event: { preventDefault(): void }): Promise<void> {
@@ -53,6 +63,7 @@ export class DesktopLifecycle {
     if (this.quitAttemptInProgress) return;
 
     this.quitAttemptInProgress = true;
+    let closeAllSucceeded = false;
     try {
       const activeTerminals = (await this.options.manager.list()).filter(
         (descriptor) => descriptor.state === "running",
@@ -64,12 +75,16 @@ export class DesktopLifecycle {
         return;
       }
 
+      this.options.admission.close();
+      await this.options.admission.drain();
       await this.options.manager.closeAll();
+      closeAllSucceeded = true;
       await this.options.closeDatabase();
       await this.options.unregisterIpc();
       this.quitting = true;
       this.options.app.quit();
     } catch (error) {
+      if (!closeAllSucceeded) this.options.admission.reopen();
       this.report(error);
     } finally {
       this.quitAttemptInProgress = false;

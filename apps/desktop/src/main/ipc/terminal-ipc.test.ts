@@ -5,6 +5,7 @@ import {
   type TerminalOutputChunk,
 } from "@codra/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { TerminalAdmissionGate, TerminalShutdownError } from "./admission";
 import { registerTerminalIpc } from "./terminal-ipc";
 
 type Handler = (event: unknown, payload?: unknown) => unknown;
@@ -197,5 +198,126 @@ describe("registerTerminalIpc", () => {
     );
     expect(harness.handlers.has(IPC_CHANNELS.terminalCreate)).toBe(false);
     expect(harness.windows[0]?.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("drains admitted creates before closeAll and rejects later requests during quit", async () => {
+    const handlers = new Map<string, Handler>();
+    const admission = new TerminalAdmissionGate();
+    const activeTerminalIds = new Set<string>();
+    let resolveCreate!: (value: TerminalDescriptor) => void;
+    const manager = {
+      list: vi.fn(async () => []),
+      create: vi.fn(() => {
+        activeTerminalIds.add(terminalId);
+        return new Promise<TerminalDescriptor>((resolve) => {
+          resolveCreate = resolve;
+        });
+      }),
+      write: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      replay: vi.fn(async () => []),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => {
+        expect([...activeTerminalIds]).toEqual([terminalId]);
+      }),
+      onOutput: vi.fn(() => () => undefined),
+      onChanged: vi.fn(() => () => undefined),
+    };
+    const ipc = {
+      handle: vi.fn((channel: string, handler: Handler) =>
+        handlers.set(channel, handler),
+      ),
+      removeHandler: vi.fn((channel: string) => handlers.delete(channel)),
+    };
+    const unregisterIpc = registerTerminalIpc({
+      ipc,
+      manager,
+      windows: () => [],
+      admission,
+    });
+    const { DesktopLifecycle } = await import("../lifecycle");
+    const lifecycle = new DesktopLifecycle({
+      app: { quit: vi.fn() },
+      manager,
+      platform: "darwin",
+      getWindowCount: () => 1,
+      createWindow: vi.fn(),
+      confirmQuit: vi.fn(async () => true),
+      closeDatabase: vi.fn(),
+      unregisterIpc,
+      admission,
+    });
+    const create = handlers.get(IPC_CHANNELS.terminalCreate)!(
+      {},
+      {
+        cols: 80,
+        rows: 24,
+      },
+    );
+
+    const quitting = lifecycle.onBeforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(admission.isClosed()).toBe(true));
+
+    await expect(
+      handlers.get(IPC_CHANNELS.terminalCreate)!({}, { cols: 80, rows: 24 }),
+    ).rejects.toBeInstanceOf(TerminalShutdownError);
+    expect(manager.closeAll).not.toHaveBeenCalled();
+
+    resolveCreate(descriptor);
+    await create;
+    await quitting;
+
+    expect(manager.closeAll).toHaveBeenCalledOnce();
+  });
+
+  it("reopens admission after closeAll fails so later IPC can be served", async () => {
+    const handlers = new Map<string, Handler>();
+    const admission = new TerminalAdmissionGate();
+    const failure = new Error("terminal termination failed");
+    const manager = {
+      list: vi.fn(async () => []),
+      create: vi.fn(async () => descriptor),
+      write: vi.fn(async () => undefined),
+      resize: vi.fn(async () => undefined),
+      replay: vi.fn(async () => []),
+      close: vi.fn(async () => undefined),
+      closeAll: vi.fn(async () => {
+        throw failure;
+      }),
+      onOutput: vi.fn(() => () => undefined),
+      onChanged: vi.fn(() => () => undefined),
+    };
+    const ipc = {
+      handle: vi.fn((channel: string, handler: Handler) =>
+        handlers.set(channel, handler),
+      ),
+      removeHandler: vi.fn(),
+    };
+    const unregisterIpc = registerTerminalIpc({
+      ipc,
+      manager,
+      windows: () => [],
+      admission,
+    });
+    const { DesktopLifecycle } = await import("../lifecycle");
+    const lifecycle = new DesktopLifecycle({
+      app: { quit: vi.fn() },
+      manager,
+      platform: "darwin",
+      getWindowCount: () => 1,
+      createWindow: vi.fn(),
+      confirmQuit: vi.fn(async () => true),
+      closeDatabase: vi.fn(),
+      unregisterIpc,
+      admission,
+      reportError: vi.fn(),
+    });
+
+    await lifecycle.onBeforeQuit({ preventDefault: vi.fn() });
+
+    expect(admission.isClosed()).toBe(false);
+    await expect(
+      handlers.get(IPC_CHANNELS.terminalCreate)!({}, { cols: 80, rows: 24 }),
+    ).resolves.toEqual(descriptor);
   });
 });

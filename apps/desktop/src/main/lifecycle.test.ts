@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { TerminalDescriptor } from "@codra/protocol";
 import { describe, expect, it, vi } from "vitest";
+import { TerminalAdmissionGate } from "./ipc/admission";
 import { DesktopLifecycle } from "./lifecycle";
 
 const runningDescriptor: TerminalDescriptor = {
@@ -50,6 +51,7 @@ function createLifecycleHarness({
     confirmQuit: confirm,
     closeDatabase,
     unregisterIpc,
+    admission: new TerminalAdmissionGate(),
     reportError,
   });
 

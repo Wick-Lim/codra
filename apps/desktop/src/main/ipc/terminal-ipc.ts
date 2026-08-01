@@ -12,6 +12,10 @@ import {
   type TerminalOutputChunk,
   type WriteTerminalRequest,
 } from "@codra/protocol";
+import {
+  TerminalAdmissionGate,
+  type TerminalRequestAdmission,
+} from "./admission";
 
 type IpcHandler = (event: unknown, payload?: unknown) => unknown;
 
@@ -42,6 +46,7 @@ export interface RegisterTerminalIpcOptions {
   ipc: IpcMainLike;
   manager: TerminalManagerIpcPort;
   windows(): readonly BrowserWindowLike[];
+  admission?: TerminalRequestAdmission;
   reportError?(error: unknown): void;
 }
 
@@ -75,40 +80,82 @@ export function registerTerminalIpc({
   ipc,
   manager,
   windows,
+  admission = new TerminalAdmissionGate(),
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
-  ipc.handle(IPC_CHANNELS.terminalList, () => manager.list());
-  ipc.handle(IPC_CHANNELS.terminalCreate, (_event, rawRequest) =>
-    manager.create(CreateTerminalRequestSchema.parse(rawRequest)),
-  );
-  ipc.handle(IPC_CHANNELS.terminalWrite, (_event, rawRequest) =>
-    manager.write(WriteTerminalRequestSchema.parse(rawRequest)),
-  );
-  ipc.handle(IPC_CHANNELS.terminalResize, (_event, rawRequest) =>
-    manager.resize(ResizeTerminalRequestSchema.parse(rawRequest)),
-  );
-  ipc.handle(IPC_CHANNELS.terminalReplay, (_event, rawRequest) =>
-    manager.replay(ReplayTerminalRequestSchema.parse(rawRequest)),
-  );
-  ipc.handle(IPC_CHANNELS.terminalClose, (_event, rawTerminalId) =>
-    manager.close(TerminalIdSchema.parse(rawTerminalId)),
-  );
+  const registrations: readonly [string, IpcHandler][] = [
+    [IPC_CHANNELS.terminalList, () => admission.run(() => manager.list())],
+    [
+      IPC_CHANNELS.terminalCreate,
+      (_event, rawRequest) =>
+        admission.run(() =>
+          manager.create(CreateTerminalRequestSchema.parse(rawRequest)),
+        ),
+    ],
+    [
+      IPC_CHANNELS.terminalWrite,
+      (_event, rawRequest) =>
+        admission.run(() =>
+          manager.write(WriteTerminalRequestSchema.parse(rawRequest)),
+        ),
+    ],
+    [
+      IPC_CHANNELS.terminalResize,
+      (_event, rawRequest) =>
+        admission.run(() =>
+          manager.resize(ResizeTerminalRequestSchema.parse(rawRequest)),
+        ),
+    ],
+    [
+      IPC_CHANNELS.terminalReplay,
+      (_event, rawRequest) =>
+        admission.run(() =>
+          manager.replay(ReplayTerminalRequestSchema.parse(rawRequest)),
+        ),
+    ],
+    [
+      IPC_CHANNELS.terminalClose,
+      (_event, rawTerminalId) =>
+        admission.run(() =>
+          manager.close(TerminalIdSchema.parse(rawTerminalId)),
+        ),
+    ],
+  ];
+  const registeredChannels: string[] = [];
+  let unsubscribeOutput: (() => void) | undefined;
+  let unsubscribeChanged: (() => void) | undefined;
 
-  const unsubscribeOutput = manager.onOutput((chunk) => {
-    sendToLiveWindows(windows, IPC_CHANNELS.terminalOutput, chunk, reportError);
-  });
-  const unsubscribeChanged = manager.onChanged((descriptor) => {
-    sendToLiveWindows(
-      windows,
-      IPC_CHANNELS.terminalChanged,
-      descriptor,
-      reportError,
-    );
-  });
+  try {
+    for (const [channel, handler] of registrations) {
+      ipc.handle(channel, handler);
+      registeredChannels.push(channel);
+    }
+    unsubscribeOutput = manager.onOutput((chunk) => {
+      sendToLiveWindows(
+        windows,
+        IPC_CHANNELS.terminalOutput,
+        chunk,
+        reportError,
+      );
+    });
+    unsubscribeChanged = manager.onChanged((descriptor) => {
+      sendToLiveWindows(
+        windows,
+        IPC_CHANNELS.terminalChanged,
+        descriptor,
+        reportError,
+      );
+    });
+  } catch (error) {
+    for (const channel of registeredChannels) ipc.removeHandler(channel);
+    unsubscribeOutput?.();
+    unsubscribeChanged?.();
+    throw error;
+  }
 
   return () => {
     for (const channel of requestChannels) ipc.removeHandler(channel);
-    unsubscribeOutput();
-    unsubscribeChanged();
+    unsubscribeOutput?.();
+    unsubscribeChanged?.();
   };
 }
