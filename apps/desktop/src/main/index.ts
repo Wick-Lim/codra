@@ -11,6 +11,14 @@ import { buildBrowserWindowOptions } from "./window-options";
 
 let mainWindow: BrowserWindow | undefined;
 
+const isolatedUserDataPath = process.env.CODRA_USER_DATA_DIR;
+if (
+  isolatedUserDataPath &&
+  (!app.isPackaged || process.env.CODRA_PACKAGED_SMOKE === "1")
+) {
+  app.setPath("userData", isolatedUserDataPath);
+}
+
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow(
     buildBrowserWindowOptions(join(__dirname, "../preload/index.js")),

@@ -250,6 +250,7 @@ export function TerminalPane({
       className="terminal-pane"
       role="region"
       aria-label={`Terminal ${terminal.title}`}
+      data-testid="active-terminal"
       data-terminal-id={terminal.id}
     >
       <div className="terminal-canvas" ref={hostRef} />

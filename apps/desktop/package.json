@@ -1,11 +1,15 @@
 {
   "name": "@codra/desktop",
   "version": "0.0.1",
+  "description": "Standalone local terminal for macOS",
+  "author": "CODRA Contributors",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "package:dir": "pnpm build && electron-builder --dir --mac --publish never",
+    "package:mac": "pnpm build && electron-builder --mac --publish never",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },

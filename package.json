@@ -8,15 +8,21 @@
   },
   "scripts": {
     "dev": "pnpm --filter @codra/desktop dev",
+    "postinstall": "pnpm --filter @codra/desktop exec electron-builder install-app-deps && node scripts/ensure-node-pty-helper-mode.mjs",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
+    "test:e2e": "pnpm build && playwright test --project=dev-electron",
+    "test:packaged": "playwright test --project=packaged-electron",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.62.1",
+    "electron-builder": "26.15.3",
     "eslint": "10.8.0",
+    "playwright": "1.62.1",
     "prettier": "3.9.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.65.0"

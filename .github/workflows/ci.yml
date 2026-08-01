@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  standalone-macos:
+    runs-on: macos-14
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.5.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run unit and integration tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run development Electron E2E
+        run: pnpm test:e2e
+
+      - name: Package unsigned host-architecture app
+        run: pnpm --filter @codra/desktop package:dir
+
+      - name: Run packaged executable smoke
+        run: pnpm test:packaged
+
+      - name: Upload unpacked app
+        uses: actions/upload-artifact@v4
+        with:
+          name: CODRA-macos-unpacked
+          path: apps/desktop/dist/mac*/CODRA.app
+          if-no-files-found: error
