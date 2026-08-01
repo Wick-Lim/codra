@@ -1,33 +1,35 @@
-# CODRA Remote Terminal MVP Design
+# CODRA Standalone Desktop + Remote Terminal MVP Design
 
 **Date:** 2026-08-01
-**Status:** Approved for implementation planning
+**Status:** Revised for user review
 **Product:** CODRA — Parallel agents, controlled.
 
 ## Summary
 
-CODRA's first vertical slice lets a signed-in user connect from a web browser to a background `codrad` process running on a Mac, then list, attach to, and control host terminal sessions. Firebase Authentication establishes the user identity. Cloud Firestore carries short-lived WebRTC signaling records only. The terminal data plane uses encrypted WebRTC DataChannels, with a direct peer-to-peer route preferred and Cloudflare Realtime TURN used when direct ICE connectivity fails.
+CODRA's first deliverable is a standalone macOS Electron application. A user can launch CODRA, open a local terminal, and run a shell or agent CLI without creating an account. Electron is the local UI, while an independent background `codrad` process owns PTYs, scrollback, and session state. The Electron window connects to `codrad` through authenticated local RPC.
 
-The browser never creates a host shell. It renders a remote terminal with xterm.js while `codrad` owns each PTY through `node-pty`. Closing the Electron window must not end `codrad`, its PTYs, or an active remote connection.
+Remote access is the second layer on top of that working desktop host. After the user signs in and enables remote access, the Electron/codrad installation registers as a selectable host. A signed-in browser can then attach to that host. Firebase Authentication establishes identity, Firestore carries short-lived WebRTC signaling records, and encrypted WebRTC DataChannels carry terminal traffic directly or through Cloudflare TURN.
 
-This slice deliberately precedes the full Task Board, agent race, review, Jira, GitHub, and validation roadmap. It establishes the remote transport and persistent terminal boundary that those features will later reuse.
+The web application is never a standalone terminal host and cannot create a host shell. It is only a remote client for an already installed, online, and approved CODRA desktop host. Closing the Electron window must not end `codrad`, its PTYs, or an active remote connection.
 
 ## Goals
 
-1. Authenticate the same user on the host and web client with Firebase Authentication.
-2. Register host and browser devices and display recently active hosts.
-3. Require an explicit, host-signed approval for a new remote session.
-4. Exchange SDP offers, answers, and trickled ICE candidates through Firestore.
-5. Prefer direct WebRTC connectivity and fall back to Cloudflare TURN.
-6. List, create, attach to, write to, and resize host PTYs from the web client.
-7. Keep control messages responsive during large terminal output bursts.
-8. Restore terminal scrollback after a temporary browser or network disconnect.
-9. Keep source code, prompts, terminal input, and terminal output out of Firebase and application telemetry.
-10. Keep all Cloudflare long-lived credentials in Cloud Secret Manager.
+1. Ship a standalone Electron application that works locally without login or Firebase availability.
+2. Start or reconnect to an independent `codrad` process from Electron through versioned local RPC.
+3. Create, list, attach to, write to, and resize host PTYs in the Electron UI.
+4. Keep `codrad` and its PTYs alive when the Electron window closes, then reattach when it reopens.
+5. Add opt-in Firebase Authentication and register the installed desktop as a remote host.
+6. Register browser devices, display recently active hosts, and require host-signed approval.
+7. Exchange SDP offers, answers, and trickled ICE candidates through Firestore.
+8. Prefer direct WebRTC connectivity and fall back to Cloudflare TURN.
+9. Attach to the same host PTYs from the web client without moving terminal data into Firebase.
+10. Keep local and remote control responsive during large output bursts and restore scrollback after disconnects.
+11. Keep all Cloudflare long-lived credentials in Cloud Secret Manager.
 
 ## Non-goals
 
 - Full CODRA Task Board, worktree lifecycle, agent adapters, validation, review, Jira, or GitHub integration
+- A browser-only CODRA product or a web client that can act as a terminal host
 - Team workspaces or cross-user terminal sharing
 - Mobile-native applications
 - File transfer, browser streaming, desktop screen sharing, or port forwarding
@@ -43,6 +45,8 @@ This slice deliberately precedes the full Task Board, agent race, review, Jira, 
 | --- | --- |
 | Host UI | Electron + React |
 | Host runtime | Independent Node.js `codrad` process |
+| Local terminal UI | xterm.js in Electron renderer |
+| Local transport | Versioned RPC over Unix domain socket |
 | Host WebRTC | `node-datachannel` in `codrad` |
 | Host terminal | `node-pty` |
 | Web client | React + Vite + xterm.js |
@@ -59,26 +63,24 @@ This slice deliberately precedes the full Task Board, agent race, review, Jira, 
 ## System Architecture
 
 ```text
-┌──────────────────────────┐
-│ Web client               │
-│ React + xterm.js         │
-│ Firebase Auth            │
-│ Browser RTCPeerConnection│
-└─────────────┬────────────┘
-              │ WebRTC DataChannels
-              │ direct ICE or Cloudflare TURN
-┌─────────────▼────────────┐
-│ codrad on host Mac       │
-│ node-datachannel         │
-│ remote session manager  │
-│ terminal router         │
-└─────────────┬────────────┘
-              │
-        ┌─────▼─────┐
-        │ node-pty  │
-        │ shell /   │
-        │ agent CLI │
-        └───────────┘
+┌─────────────────────────┐
+│ CODRA Desktop           │
+│ Electron + React        │
+│ local xterm.js terminal │
+└────────────┬────────────┘
+             │ authenticated local RPC
+             │ Unix domain socket
+┌────────────▼────────────┐      WebRTC DataChannels      ┌──────────────────────────┐
+│ codrad on host Mac      │◀─────────────────────────────▶│ Optional web client      │
+│ terminal/session owner  │   direct or Cloudflare TURN  │ React + xterm.js         │
+│ node-datachannel        │                               │ Browser RTCPeerConnection│
+└────────────┬────────────┘                               └──────────────────────────┘
+             │
+       ┌─────▼─────┐
+       │ node-pty  │
+       │ shell /   │
+       │ agent CLI │
+       └───────────┘
 
 Firebase control plane
 ├─ Authentication: user identity
@@ -88,6 +90,32 @@ Firebase control plane
 
 Firestore is a signaling plane, not a data plane. A successful WebRTC connection makes continued terminal traffic independent of Firestore. Firestore remains available only for connection-state updates and a later reconnect attempt.
 
+## Desktop-first Delivery Contract
+
+The standalone desktop path is a complete product increment and is implemented before any Firebase or web work:
+
+```text
+Launch CODRA Desktop
+→ start or reconnect to codrad
+→ create local PTY
+→ render it in Electron xterm.js
+→ type, resize, detach, and reattach
+→ close Electron window while codrad and PTY remain alive
+→ reopen Electron and restore the terminal list and scrollback
+```
+
+Local mode never waits for Firebase initialization and never requires login. “Enable Remote Access” is an explicit desktop setting. Enabling it starts Firebase authentication, host key registration, heartbeat, signaling listeners, and WebRTC support. Disabling it stops those listeners and peer connections without stopping local terminals.
+
+Only after the desktop contract passes its acceptance tests does the project build the web client flow:
+
+```text
+Sign in on web
+→ select an online CODRA Desktop host
+→ request host approval
+→ negotiate WebRTC through Firestore
+→ attach to a PTY already owned by codrad
+```
+
 ## Component Boundaries
 
 ### `apps/daemon`
@@ -96,7 +124,9 @@ The host runtime owns PTYs, WebRTC peer connections, session authorization, scro
 
 ### `apps/desktop`
 
-The Electron application signs the user in, starts or discovers `codrad`, shows device presence, and presents the host approval prompt. Closing the window leaves the background daemon alive. On first host registration, `codrad` generates a P-256 signing key and stores its private material in the macOS Keychain; the public JWK is registered with Firebase. The desktop forwards a Firebase ID token to the daemon through authenticated local IPC; it never forwards a refresh token or private device key over WebRTC.
+The Electron application is CODRA's primary product surface. It starts or discovers `codrad`, authenticates the local socket, renders local xterm.js terminals, and restores the daemon's terminal list and scrollback. These features work without login. Closing the window leaves the background daemon alive.
+
+When remote access is enabled, the desktop also signs the user in, shows device presence, and presents host approval prompts. On first host registration, `codrad` generates a P-256 signing key and stores its private material in the macOS Keychain; the public JWK is registered with Firebase. The desktop forwards a Firebase ID token to the daemon through authenticated local IPC; it never forwards a refresh token or private device key over WebRTC.
 
 ### `apps/web`
 
@@ -445,6 +475,10 @@ Client-facing errors contain a safe message and retryability flag. Firebase, Clo
 
 ### Integration tests
 
+- Electron launches and connects to a newly started daemon over the local socket
+- Electron creates, renders, writes to, resizes, detaches from, and reattaches to a local PTY without Firebase
+- Closing and reopening the Electron window preserves the daemon, PTY process, terminal list, and scrollback
+- Local terminal startup still succeeds when Firebase endpoints are unavailable
 - Browser `RTCPeerConnection` interoperates with `node-datachannel`
 - Offer, answer, and trickled candidates traverse Firestore Emulator
 - Terminal creation, output, input, resize, detach, and reattach
@@ -465,41 +499,47 @@ The real TURN smoke suite is opt-in and uses Secret Manager. It is not run for u
 
 ## Deployment Shape
 
+- The first distributable is a signed macOS Electron application with `codrad` installed as a background user service.
+- Local terminal features have no runtime dependency on Firebase or Cloudflare.
 - Firebase Hosting serves `apps/web`.
 - Firebase Functions 2nd gen run in `asia-northeast3`.
 - Firestore rules, indexes, and TTL policies deploy from the repository.
 - `CLOUDFLARE_TURN_CONFIG` is configured interactively through Firebase CLI after the exposed token is rotated.
-- The macOS app bundles Electron while `codrad` is installed as a background user service.
 - Development uses Firebase Emulator Suite and fake TURN responses by default.
 
 ## Delivery Milestones
 
-1. **Greenfield foundation:** pnpm monorepo, TypeScript, linting, testing, Firebase config, CI, shared schemas.
-2. **Identity and devices:** host/web sign-in, device registry, heartbeat, host list, rules tests.
-3. **TURN boundary:** authenticated issue/revoke functions, Secret Manager binding, Cloudflare adapter tests.
-4. **Transport proof:** Firestore signaling and browser-to-`node-datachannel` DataChannel with direct and relay smoke tests.
-5. **Terminal core:** daemon lifecycle, `node-pty`, local terminal registry, bounded scrollback.
-6. **Remote terminal:** protocol routing, xterm.js attach/input/resize, acknowledgements, backpressure.
-7. **Recovery and hardening:** reconnect, cursor replay, cleanup, App Check enforcement, packaging, privacy checks.
+1. **Greenfield foundation:** pnpm monorepo, TypeScript, linting, testing, CI, shared schemas, Electron build pipeline.
+2. **Standalone desktop shell:** Electron window, secure preload bridge, local daemon bootstrap, authenticated Unix-socket RPC.
+3. **Local terminal core:** `node-pty`, terminal registry, Electron xterm.js, input, resize, detach, bounded scrollback.
+4. **Desktop lifecycle:** daemon background service, window-close persistence, reopen/reattach, macOS development packaging.
+5. **Identity and devices:** opt-in host/web sign-in, host key registration, heartbeat, host list, rules tests.
+6. **TURN boundary:** authenticated issue/revoke functions, Secret Manager binding, Cloudflare adapter tests.
+7. **Transport proof:** Firestore signaling and browser-to-`node-datachannel` DataChannel with direct and relay smoke tests.
+8. **Remote terminal:** restricted protocol routing, web xterm.js attach/input/resize, acknowledgements, backpressure.
+9. **Recovery and hardening:** reconnect, cursor replay, cleanup, App Check enforcement, production packaging, privacy checks.
 
 Each milestone must produce a separately testable result. Full CODRA Task and agent-control features begin only after this remote terminal foundation passes its acceptance criteria.
 
 ## Acceptance Criteria
 
-1. A user can sign in on a host Mac and in a supported desktop browser with the same Firebase account.
-2. The browser displays the host as online within 60 seconds and offline within 120 seconds of heartbeat loss.
-3. A new browser cannot connect until the selected host signs and approves its session request; another same-account browser cannot forge that approval.
-4. The same web client connects over direct ICE when possible and over forced Cloudflare TURN in the relay smoke test.
-5. The web client can list, create, attach to, type into, and resize a host terminal.
-6. ANSI output renders correctly in xterm.js.
-7. Closing the Electron window does not terminate `codrad`, its PTY, or the active remote terminal.
-8. Reconnecting after a temporary disconnect restores output from the last acknowledged cursor without duplicated terminal bytes.
-9. A ten MiB output burst does not freeze input, resize, ping, or detach handling.
-10. Cross-user Firestore access, forged host approvals, and unauthorized TURN issuance are denied by automated tests.
-11. Firestore contains no terminal input, terminal output, prompt, file content, or scrollback.
-12. Client artifacts and Git history contain no Cloudflare API token, Firebase Admin key, TURN password, or service-account key.
-13. Normal session closure requests credential revocation and expired sessions reject new signals.
-14. Unit, emulator, integration, and production-build checks pass in CI; real TURN smoke checks pass in the trusted deployment environment.
+1. CODRA launches as a standalone Electron application on macOS without requiring login.
+2. With Firebase and Cloudflare unavailable, Electron can still create and operate a local shell through `codrad`.
+3. The Electron terminal supports ANSI rendering, input, resize, detach, and reattach.
+4. Closing the Electron window does not terminate `codrad` or its PTYs; reopening restores the terminal list and scrollback.
+5. Remote access is disabled by default and can be enabled without changing local terminal behavior.
+6. A user can sign in on the host Mac and in a supported desktop browser with the same Firebase account.
+7. The browser displays the installed CODRA host as online within 60 seconds and offline within 120 seconds of heartbeat loss.
+8. A new browser cannot connect until the selected host signs and approves its session request; another same-account browser cannot forge that approval.
+9. The same web client connects over direct ICE when possible and over forced Cloudflare TURN in the relay smoke test.
+10. The web client can list, create, attach to, type into, and resize a PTY owned by the selected `codrad` host.
+11. Reconnecting after a temporary disconnect restores output from the last acknowledged cursor without duplicated terminal bytes.
+12. A ten MiB output burst does not freeze local or remote input, resize, ping, or detach handling.
+13. Cross-user Firestore access, forged host approvals, and unauthorized TURN issuance are denied by automated tests.
+14. Firestore contains no terminal input, terminal output, prompt, file content, or scrollback.
+15. Client artifacts and Git history contain no Cloudflare API token, Firebase Admin key, TURN password, or service-account key.
+16. Normal session closure requests credential revocation and expired sessions reject new signals.
+17. Unit, emulator, integration, standalone desktop build, and web production-build checks pass in CI; real TURN smoke checks pass in the trusted deployment environment.
 
 ## Follow-on Work
 
