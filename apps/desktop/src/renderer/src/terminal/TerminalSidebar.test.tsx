@@ -111,13 +111,18 @@ function chunk(
 
 function deferred<T>() {
   let resolve: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((finish) => {
+  let reject: ((reason: unknown) => void) | undefined;
+  const promise = new Promise<T>((finish, fail) => {
     resolve = finish;
+    reject = fail;
   });
   return {
     promise,
     resolve(value: T) {
       resolve?.(value);
+    },
+    reject(reason: unknown) {
+      reject?.(reason);
     },
   };
 }
@@ -400,6 +405,154 @@ describe("TerminalPane", () => {
         ["thirteen\r\n"],
       ]);
     });
+  });
+
+  it("renders buffered live output above sequence one when initial replay fails", async () => {
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay).mockRejectedValueOnce(
+      new Error("scrollback unavailable"),
+    );
+    render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(7, "live seven\r\n")]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith(
+        "live seven\r\n",
+      );
+    });
+  });
+
+  it("renders live output that arrives after initial replay has failed", async () => {
+    const failedReplay = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi(failedReplay.promise);
+    const { rerender } = render(
+      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+    );
+
+    await act(async () => {
+      failedReplay.reject(new Error("scrollback unavailable"));
+      await failedReplay.promise.catch(() => undefined);
+    });
+    rerender(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(9, "live nine\r\n")]}
+        api={api}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledWith(
+        "live nine\r\n",
+      );
+    });
+  });
+
+  it("retains replay and resumes live output when a later replay page fails", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const failedPage = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay)
+      .mockResolvedValueOnce(firstPage)
+      .mockReturnValueOnce(failedPage.promise);
+    const { rerender } = render(
+      <TerminalPane terminal={runningTerminal} output={[]} api={api} />,
+    );
+    await waitFor(() => {
+      expect(api.terminal.replay).toHaveBeenCalledTimes(2);
+    });
+
+    await act(async () => {
+      failedPage.reject(new Error("second replay page unavailable"));
+      await failedPage.promise.catch(() => undefined);
+    });
+    expect(xtermMocks.terminals[0]?.write).toHaveBeenCalledTimes(1000);
+
+    rerender(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(1005, "live 1005\r\n")]}
+        api={api}
+      />,
+    );
+    await waitFor(() => {
+      expect(xtermMocks.terminals[0]?.write).toHaveBeenLastCalledWith(
+        "live 1005\r\n",
+      );
+    });
+  });
+
+  it("does not recover a failed replay into a stale terminal after terminal change", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const failedPage = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay).mockImplementation((request) => {
+      if (request.terminalId === exitedTerminal.id) return Promise.resolve([]);
+      if (request.afterSequence === 0) return Promise.resolve(firstPage);
+      return failedPage.promise;
+    });
+    const { rerender } = render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(1005, "stale live\r\n")]}
+        api={api}
+      />,
+    );
+    const staleXterm = xtermMocks.terminals[0];
+    await waitFor(() => {
+      expect(api.terminal.replay).toHaveBeenCalledWith({
+        terminalId: runningTerminal.id,
+        afterSequence: 1000,
+        limit: 1000,
+      });
+    });
+
+    rerender(<TerminalPane terminal={exitedTerminal} output={[]} api={api} />);
+    await act(async () => {
+      failedPage.reject(new Error("stale page failed"));
+      await failedPage.promise.catch(() => undefined);
+    });
+
+    expect(staleXterm?.write).not.toHaveBeenCalled();
+  });
+
+  it("does not recover a failed replay after unmount", async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, index) =>
+      chunk(index + 1),
+    );
+    const failedPage = deferred<TerminalOutputChunk[]>();
+    const api = createPaneApi();
+    vi.mocked(api.terminal.replay)
+      .mockResolvedValueOnce(firstPage)
+      .mockReturnValueOnce(failedPage.promise);
+    const { unmount } = render(
+      <TerminalPane
+        terminal={runningTerminal}
+        output={[chunk(1005, "stale live\r\n")]}
+        api={api}
+      />,
+    );
+    const staleXterm = xtermMocks.terminals[0];
+    await waitFor(() => {
+      expect(api.terminal.replay).toHaveBeenCalledTimes(2);
+    });
+
+    unmount();
+    await act(async () => {
+      failedPage.reject(new Error("stale page failed"));
+      await failedPage.promise.catch(() => undefined);
+    });
+
+    expect(staleXterm?.write).not.toHaveBeenCalled();
   });
 
   it("cancels a stale replay page when the active terminal changes", async () => {

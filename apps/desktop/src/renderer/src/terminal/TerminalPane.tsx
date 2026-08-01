@@ -20,6 +20,8 @@ interface TerminalRuntime {
   pendingLive: Map<number, TerminalOutputChunk>;
   lastWrittenSequence: number;
   replayReady: boolean;
+  replayDegraded: boolean;
+  fallbackBaselineEstablished: boolean;
   disposed: boolean;
 }
 
@@ -28,6 +30,25 @@ function flushOutput(runtime: TerminalRuntime): void {
 
   let nextSequence = runtime.lastWrittenSequence + 1;
   let chunk = runtime.pendingLive.get(nextSequence);
+  if (
+    !chunk &&
+    runtime.replayDegraded &&
+    !runtime.fallbackBaselineEstablished &&
+    runtime.pendingLive.size > 0
+  ) {
+    let fallbackSequence: number | undefined;
+    for (const sequence of runtime.pendingLive.keys()) {
+      if (fallbackSequence === undefined || sequence < fallbackSequence) {
+        fallbackSequence = sequence;
+      }
+    }
+    if (fallbackSequence !== undefined) {
+      nextSequence = fallbackSequence;
+      runtime.lastWrittenSequence = nextSequence - 1;
+      runtime.fallbackBaselineEstablished = true;
+      chunk = runtime.pendingLive.get(nextSequence);
+    }
+  }
   while (chunk) {
     runtime.xterm.write(chunk.data);
     runtime.pendingLive.delete(nextSequence);
@@ -40,6 +61,7 @@ function flushOutput(runtime: TerminalRuntime): void {
 function finishReplay(
   runtime: TerminalRuntime,
   replayed: ReadonlyMap<number, TerminalOutputChunk>,
+  degraded: boolean,
 ): void {
   if (runtime.disposed) return;
 
@@ -54,6 +76,8 @@ function finishReplay(
     }
   }
   runtime.replayReady = true;
+  runtime.replayDegraded = degraded;
+  runtime.fallbackBaselineEstablished = false;
   flushOutput(runtime);
 }
 
@@ -64,6 +88,7 @@ async function replayAll(
   const pageSize = 1000;
   const replayed = new Map<number, TerminalOutputChunk>();
   let afterSequence = 0;
+  let degraded = false;
 
   try {
     while (!runtime.disposed) {
@@ -94,10 +119,10 @@ async function replayAll(
       afterSequence = nextAfterSequence;
     }
   } catch {
-    // Keep the live terminal usable when persisted scrollback is unavailable.
+    degraded = true;
   }
 
-  finishReplay(runtime, replayed);
+  finishReplay(runtime, replayed, degraded);
 }
 
 export function TerminalPane({
@@ -141,6 +166,8 @@ export function TerminalPane({
       pendingLive: new Map(),
       lastWrittenSequence: 0,
       replayReady: false,
+      replayDegraded: false,
+      fallbackBaselineEstablished: false,
       disposed: false,
     };
     runtimeRef.current = runtime;
