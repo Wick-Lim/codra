@@ -1,2 +1,6 @@
+node_modules/
+apps/desktop/out/
+apps/desktop/dist/
+.DS_Store
 .superpowers/
 .worktrees/
