@@ -9,6 +9,7 @@
     "./emulator": "./src/emulator.ts"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

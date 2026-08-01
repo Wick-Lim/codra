@@ -15,7 +15,7 @@ packages:
   "@codra/protocol@file:vendor/codra-protocol-0.0.1.tgz":
     resolution:
       {
-        integrity: sha512-CNvPRTRkSw+CFbK5d57R0PqSwfxdgXLx1zZmd0JPdKa+hSAdTF+nW9Lym7i4gYkmH3Jb0TMYJ7jVMqCbhy7btA==,
+        integrity: sha512-0TqlLJwxJYEZN3w6GmGO8+LQZPJ+m+f/KUaoNsKx6+dbAT1JAxPns6L3KnCiCuFbRRdEfJfhQAGFPiFoO7uPAQ==,
         tarball: file:vendor/codra-protocol-0.0.1.tgz,
       }
     version: 0.0.1

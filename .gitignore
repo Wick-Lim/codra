@@ -12,6 +12,7 @@ firestore-debug.log
 functions-deploy/lib/
 functions-deploy/vendor/
 functions-deploy/functions-component-manifest.json
+functions-deploy-build/
 apps/desktop/out-remote-test/
 apps/desktop/dist-remote-test/
 apps/desktop/remote-test-provenance.json

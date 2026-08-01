@@ -9,6 +9,7 @@ export default tseslint.config(
       "**/out-remote-test/**",
       "**/dist/**",
       "**/dist-remote-test/**",
+      "**/functions-deploy-build/**",
     ],
   },
   js.configs.recommended,

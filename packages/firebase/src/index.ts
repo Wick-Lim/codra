@@ -58,6 +58,8 @@ import {
 } from "@codra/protocol";
 import { z } from "zod";
 
+export * from "./auth-client";
+
 type DeploymentConfig = ProductionDeploymentConfig | EmulatorDeploymentConfig;
 
 export const DEMO_FIREBASE_OPTIONS = {
