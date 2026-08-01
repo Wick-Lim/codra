@@ -129,3 +129,58 @@ test("restores an active terminal and quits it through the confirmed warning", a
     }
   }
 });
+
+test("keeps the secured CODRA renderer when navigation or a new window is requested", async () => {
+  const userDataDir = await mkdtemp(path.join(tmpdir(), "codra-security-e2e-"));
+  let electronApp: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  let electronPid: number | undefined;
+  const knownDescendantPids = new Set<number>();
+
+  try {
+    electronApp = await electron.launch({
+      args: [desktopMainEntry],
+      env: {
+        ...process.env,
+        CODRA_USER_DATA_DIR: userDataDir,
+      },
+    });
+    electronPid = electronApp.process().pid!;
+    await electronApp.context().route("https://attacker.example/**", (route) =>
+      route.fulfill({
+        contentType: "text/html",
+        body: "<title>Untrusted</title><h1>Untrusted renderer</h1>",
+      }),
+    );
+    const page = await electronApp.firstWindow();
+    await expect(
+      page.getByRole("button", { name: "New terminal" }),
+    ).toBeVisible();
+    const trustedUrl = page.url();
+
+    await page.evaluate(async () => {
+      window.location.assign("https://attacker.example/navigation");
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    });
+
+    expect(page.url()).toBe(trustedUrl);
+
+    await page.evaluate(async () => {
+      window.open("https://attacker.example/popup", "_blank");
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
+    });
+
+    expect(electronApp.windows()).toHaveLength(1);
+    expect(page.url()).toBe(trustedUrl);
+    await electronApp.close();
+    await expect.poll(() => processExists(electronPid!)).toBe(false);
+  } finally {
+    try {
+      await terminateCapturedProcessTree({
+        rootPid: electronPid,
+        knownDescendantPids,
+      });
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  }
+});

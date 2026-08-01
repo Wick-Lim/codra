@@ -78,6 +78,7 @@ describe("bootstrapDesktop", () => {
       reportError,
       fatal,
       windows: () => [],
+      isTrustedRendererUrl: vi.fn(() => true),
     });
 
     expect(repository.close).toHaveBeenCalledOnce();
@@ -115,6 +116,7 @@ describe("bootstrapDesktop", () => {
       reportError,
       fatal,
       windows: () => [],
+      isTrustedRendererUrl: vi.fn(() => true),
     });
 
     expect(unregisterIpc).toHaveBeenCalledOnce();

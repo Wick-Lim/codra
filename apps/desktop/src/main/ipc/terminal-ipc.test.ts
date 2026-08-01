@@ -11,6 +11,8 @@ import { registerTerminalIpc } from "./terminal-ipc";
 type Handler = (event: unknown, payload?: unknown) => unknown;
 
 const terminalId = randomUUID();
+const trustedRendererUrl =
+  "file:///Applications/CODRA.app/Contents/Resources/app.asar/out/renderer/index.html";
 const descriptor: TerminalDescriptor = {
   id: terminalId,
   title: "Terminal",
@@ -25,6 +27,25 @@ const chunk: TerminalOutputChunk = {
   sequence: 1,
   data: "ready\\n",
 };
+
+function createTrustedRenderer() {
+  const mainFrame = { url: trustedRendererUrl };
+  const webContents = {
+    isDestroyed: vi.fn(() => false),
+    send: vi.fn(),
+    getURL: vi.fn(() => trustedRendererUrl),
+    mainFrame,
+  };
+  return {
+    event: { sender: webContents, senderFrame: mainFrame },
+    windows: [
+      {
+        isDestroyed: vi.fn(() => false),
+        webContents,
+      },
+    ],
+  };
+}
 
 function createIpcHarness() {
   const handlers = new Map<string, Handler>();
@@ -46,9 +67,28 @@ function createIpcHarness() {
       return () => changedListeners.delete(listener);
     }),
   };
+  const mainFrame = { url: trustedRendererUrl };
+  const liveWebContents = {
+    isDestroyed: vi.fn(() => false),
+    send: vi.fn(),
+    getURL: vi.fn(() => trustedRendererUrl),
+    mainFrame,
+  };
+  const destroyedWebContents = {
+    isDestroyed: vi.fn(() => true),
+    send: vi.fn(),
+    getURL: vi.fn(() => trustedRendererUrl),
+    mainFrame: { url: trustedRendererUrl },
+  };
   const windows = [
-    { webContents: { isDestroyed: vi.fn(() => false), send: vi.fn() } },
-    { webContents: { isDestroyed: vi.fn(() => true), send: vi.fn() } },
+    {
+      isDestroyed: vi.fn(() => false),
+      webContents: liveWebContents,
+    },
+    {
+      isDestroyed: vi.fn(() => false),
+      webContents: destroyedWebContents,
+    },
   ];
   const ipc = {
     handle: vi.fn((channel: string, handler: Handler) =>
@@ -60,6 +100,12 @@ function createIpcHarness() {
     ipc,
     manager,
     windows: () => windows,
+    isTrustedRendererUrl: (url) => url === trustedRendererUrl,
+  });
+
+  const trustedEvent = () => ({
+    sender: liveWebContents,
+    senderFrame: mainFrame,
   });
 
   return {
@@ -68,10 +114,14 @@ function createIpcHarness() {
     ipc,
     unregister,
     handlers: {
-      invoke: async (channel: string, payload?: unknown) => {
+      invoke: async (
+        channel: string,
+        payload?: unknown,
+        event: unknown = trustedEvent(),
+      ) => {
         const handler = handlers.get(channel);
         if (!handler) throw new Error(`No handler for ${channel}`);
-        return handler({}, payload);
+        return handler(event, payload);
       },
       has: (channel: string) => handlers.has(channel),
     },
@@ -81,6 +131,7 @@ function createIpcHarness() {
     emitChanged: (value: TerminalDescriptor) => {
       for (const listener of changedListeners) listener(value);
     },
+    trustedEvent,
   };
 }
 
@@ -142,6 +193,84 @@ describe("registerTerminalIpc", () => {
     expect(harness.manager.create).toHaveBeenCalledWith({ cols: 80, rows: 24 });
   });
 
+  it("rejects PTY creation after an owned renderer reaches an HTTPS page", async () => {
+    const harness = createIpcHarness();
+    const sender = harness.windows[0]!.webContents;
+    sender.getURL.mockReturnValue("https://attacker.example/terminal");
+
+    await expect(
+      harness.handlers.invoke(
+        IPC_CHANNELS.terminalCreate,
+        { cols: 80, rows: 24 },
+        { sender, senderFrame: sender.mainFrame },
+      ),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+
+    expect(harness.manager.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an owned main frame whose event URL is no longer trusted", async () => {
+    const harness = createIpcHarness();
+    const sender = harness.windows[0]!.webContents;
+    sender.mainFrame.url = "https://attacker.example/frame";
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalList, undefined, {
+        sender,
+        senderFrame: sender.mainFrame,
+      }),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+
+    expect(harness.manager.list).not.toHaveBeenCalled();
+  });
+
+  it("rejects a forged sender that is not owned by a live BrowserWindow", async () => {
+    const harness = createIpcHarness();
+    const mainFrame = { url: trustedRendererUrl };
+    const forgedSender = {
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+      getURL: vi.fn(() => trustedRendererUrl),
+      mainFrame,
+    };
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalList, undefined, {
+        sender: forgedSender,
+        senderFrame: mainFrame,
+      }),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+
+    expect(harness.manager.list).not.toHaveBeenCalled();
+  });
+
+  it("rejects subframe IPC before parsing or manager side effects", async () => {
+    const harness = createIpcHarness();
+    const sender = harness.windows[0]!.webContents;
+
+    await expect(
+      harness.handlers.invoke(
+        IPC_CHANNELS.terminalWrite,
+        { terminalId, data: "whoami\n" },
+        { sender, senderFrame: { url: trustedRendererUrl } },
+      ),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+
+    expect(harness.manager.write).not.toHaveBeenCalled();
+  });
+
+  it("rejects a sender owned only by a destroyed BrowserWindow", async () => {
+    const harness = createIpcHarness();
+    const owner = harness.windows[0]!;
+    owner.isDestroyed.mockReturnValue(true);
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalList),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+
+    expect(harness.manager.list).not.toHaveBeenCalled();
+  });
+
   it("fans persisted output to every live renderer", () => {
     const harness = createIpcHarness();
 
@@ -169,6 +298,26 @@ describe("registerTerminalIpc", () => {
       exitedDescriptor,
     );
     expect(harness.windows[1]?.webContents.send).not.toHaveBeenCalled();
+  });
+
+  it("withholds output from an owned window whose current URL is external", () => {
+    const harness = createIpcHarness();
+    const sender = harness.windows[0]!.webContents;
+    sender.getURL.mockReturnValue("https://attacker.example/terminal");
+
+    harness.emitOutput(chunk);
+
+    expect(sender.send).not.toHaveBeenCalled();
+  });
+
+  it("withholds descriptor events from an owned main frame on an external URL", () => {
+    const harness = createIpcHarness();
+    const sender = harness.windows[0]!.webContents;
+    sender.mainFrame.url = "https://attacker.example/terminal";
+
+    harness.emitChanged(descriptor);
+
+    expect(sender.send).not.toHaveBeenCalled();
   });
 
   it("unregisters every request handler and event subscription", () => {
@@ -229,10 +378,12 @@ describe("registerTerminalIpc", () => {
       ),
       removeHandler: vi.fn((channel: string) => handlers.delete(channel)),
     };
+    const renderer = createTrustedRenderer();
     const unregisterIpc = registerTerminalIpc({
       ipc,
       manager,
-      windows: () => [],
+      windows: () => renderer.windows,
+      isTrustedRendererUrl: (url) => url === trustedRendererUrl,
       admission,
     });
     const { DesktopLifecycle } = await import("../lifecycle");
@@ -247,19 +398,19 @@ describe("registerTerminalIpc", () => {
       unregisterIpc,
       admission,
     });
-    const create = handlers.get(IPC_CHANNELS.terminalCreate)!(
-      {},
-      {
-        cols: 80,
-        rows: 24,
-      },
-    );
+    const create = handlers.get(IPC_CHANNELS.terminalCreate)!(renderer.event, {
+      cols: 80,
+      rows: 24,
+    });
 
     const quitting = lifecycle.onBeforeQuit({ preventDefault: vi.fn() });
     await vi.waitFor(() => expect(admission.isClosed()).toBe(true));
 
     await expect(
-      handlers.get(IPC_CHANNELS.terminalCreate)!({}, { cols: 80, rows: 24 }),
+      handlers.get(IPC_CHANNELS.terminalCreate)!(renderer.event, {
+        cols: 80,
+        rows: 24,
+      }),
     ).rejects.toBeInstanceOf(TerminalShutdownError);
     expect(manager.closeAll).not.toHaveBeenCalled();
 
@@ -293,10 +444,12 @@ describe("registerTerminalIpc", () => {
       ),
       removeHandler: vi.fn(),
     };
+    const renderer = createTrustedRenderer();
     const unregisterIpc = registerTerminalIpc({
       ipc,
       manager,
-      windows: () => [],
+      windows: () => renderer.windows,
+      isTrustedRendererUrl: (url) => url === trustedRendererUrl,
       admission,
     });
     const { DesktopLifecycle } = await import("../lifecycle");
@@ -317,7 +470,10 @@ describe("registerTerminalIpc", () => {
 
     expect(admission.isClosed()).toBe(false);
     await expect(
-      handlers.get(IPC_CHANNELS.terminalCreate)!({}, { cols: 80, rows: 24 }),
+      handlers.get(IPC_CHANNELS.terminalCreate)!(renderer.event, {
+        cols: 80,
+        rows: 24,
+      }),
     ).resolves.toEqual(descriptor);
   });
 });

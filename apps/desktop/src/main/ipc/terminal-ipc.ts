@@ -16,19 +16,18 @@ import {
   TerminalAdmissionGate,
   type TerminalRequestAdmission,
 } from "./admission";
+import {
+  assertAuthorizedRenderer,
+  type BrowserWindowLike,
+} from "./renderer-authorization";
+
+export type { BrowserWindowLike } from "./renderer-authorization";
 
 type IpcHandler = (event: unknown, payload?: unknown) => unknown;
 
 export interface IpcMainLike {
   handle(channel: string, handler: IpcHandler): void;
   removeHandler(channel: string): void;
-}
-
-export interface BrowserWindowLike {
-  readonly webContents?: {
-    isDestroyed(): boolean;
-    send(channel: string, payload: unknown): void;
-  };
 }
 
 export interface TerminalManagerIpcPort {
@@ -46,6 +45,7 @@ export interface RegisterTerminalIpcOptions {
   ipc: IpcMainLike;
   manager: TerminalManagerIpcPort;
   windows(): readonly BrowserWindowLike[];
+  isTrustedRendererUrl(url: string): boolean;
   admission?: TerminalRequestAdmission;
   reportError?(error: unknown): void;
 }
@@ -61,14 +61,22 @@ const requestChannels = [
 
 function sendToLiveWindows(
   windows: () => readonly BrowserWindowLike[],
+  isTrustedRendererUrl: (url: string) => boolean,
   channel: string,
   payload: unknown,
   reportError: (error: unknown) => void,
 ): void {
   for (const window of windows()) {
     try {
+      if (window.isDestroyed?.()) continue;
       const webContents = window.webContents;
       if (!webContents || webContents.isDestroyed()) continue;
+      if (
+        !isTrustedRendererUrl(webContents.getURL()) ||
+        !isTrustedRendererUrl(webContents.mainFrame.url)
+      ) {
+        continue;
+      }
       webContents.send(channel, payload);
     } catch (error) {
       reportError(error);
@@ -80,45 +88,64 @@ export function registerTerminalIpc({
   ipc,
   manager,
   windows,
+  isTrustedRendererUrl,
   admission = new TerminalAdmissionGate(),
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
+  const authorize = (event: unknown): void =>
+    assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   const registrations: readonly [string, IpcHandler][] = [
-    [IPC_CHANNELS.terminalList, () => admission.run(() => manager.list())],
+    [
+      IPC_CHANNELS.terminalList,
+      (event) => {
+        authorize(event);
+        return admission.run(() => manager.list());
+      },
+    ],
     [
       IPC_CHANNELS.terminalCreate,
-      (_event, rawRequest) =>
-        admission.run(() =>
+      (event, rawRequest) => {
+        authorize(event);
+        return admission.run(() =>
           manager.create(CreateTerminalRequestSchema.parse(rawRequest)),
-        ),
+        );
+      },
     ],
     [
       IPC_CHANNELS.terminalWrite,
-      (_event, rawRequest) =>
-        admission.run(() =>
+      (event, rawRequest) => {
+        authorize(event);
+        return admission.run(() =>
           manager.write(WriteTerminalRequestSchema.parse(rawRequest)),
-        ),
+        );
+      },
     ],
     [
       IPC_CHANNELS.terminalResize,
-      (_event, rawRequest) =>
-        admission.run(() =>
+      (event, rawRequest) => {
+        authorize(event);
+        return admission.run(() =>
           manager.resize(ResizeTerminalRequestSchema.parse(rawRequest)),
-        ),
+        );
+      },
     ],
     [
       IPC_CHANNELS.terminalReplay,
-      (_event, rawRequest) =>
-        admission.run(() =>
+      (event, rawRequest) => {
+        authorize(event);
+        return admission.run(() =>
           manager.replay(ReplayTerminalRequestSchema.parse(rawRequest)),
-        ),
+        );
+      },
     ],
     [
       IPC_CHANNELS.terminalClose,
-      (_event, rawTerminalId) =>
-        admission.run(() =>
+      (event, rawTerminalId) => {
+        authorize(event);
+        return admission.run(() =>
           manager.close(TerminalIdSchema.parse(rawTerminalId)),
-        ),
+        );
+      },
     ],
   ];
   const registeredChannels: string[] = [];
@@ -133,6 +160,7 @@ export function registerTerminalIpc({
     unsubscribeOutput = manager.onOutput((chunk) => {
       sendToLiveWindows(
         windows,
+        isTrustedRendererUrl,
         IPC_CHANNELS.terminalOutput,
         chunk,
         reportError,
@@ -141,6 +169,7 @@ export function registerTerminalIpc({
     unsubscribeChanged = manager.onChanged((descriptor) => {
       sendToLiveWindows(
         windows,
+        isTrustedRendererUrl,
         IPC_CHANNELS.terminalChanged,
         descriptor,
         reportError,

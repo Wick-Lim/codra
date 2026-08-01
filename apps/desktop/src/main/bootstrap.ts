@@ -34,6 +34,7 @@ export interface DesktopBootstrapOptions {
   platform: NodeJS.Platform;
   ipc: IpcMainLike;
   windows(): readonly BrowserWindowLike[];
+  isTrustedRendererUrl(url: string): boolean;
   getWindowCount(): number;
   createRepository(databasePath: string): DesktopBootstrapRepository;
   createOutputStore(outputPath: string): TerminalOutputStore;
@@ -90,6 +91,7 @@ export async function bootstrapDesktop(
       ipc: options.ipc,
       manager,
       windows: options.windows,
+      isTrustedRendererUrl: options.isTrustedRendererUrl,
       admission,
       reportError: options.reportError,
     });
