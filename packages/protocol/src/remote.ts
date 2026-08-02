@@ -938,6 +938,12 @@ const terminalError = z
     message: z.string().min(1).max(512),
   })
   .strict();
+const terminalChanged = z
+  .object({
+    type: z.literal("terminal.changed"),
+    terminal: RemoteTerminalDescriptorSchema,
+  })
+  .strict();
 const cursorAck = z
   .object({
     type: z.literal("terminal.cursor_ack"),
@@ -980,6 +986,7 @@ export const RemoteControlMessageSchema = z
     operationError,
     terminalOk,
     terminalError,
+    terminalChanged,
     cursorAck,
     pingPong,
     close,

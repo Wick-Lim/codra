@@ -371,4 +371,27 @@ describe("authenticated remote protocol", () => {
       }),
     ).toThrow();
   });
+
+  it("carries attached terminal state changes without cwd or command data", () => {
+    const changed = {
+      type: "terminal.changed",
+      terminal: {
+        id: binding.sessionId,
+        title: "Codex",
+        cols: 100,
+        rows: 30,
+        state: "exited",
+        createdAt: "2026-08-02T00:00:00.000Z",
+        exitCode: 0,
+      },
+    } as const;
+
+    expect(RemoteControlMessageSchema.parse(changed)).toEqual(changed);
+    expect(() =>
+      RemoteControlMessageSchema.parse({
+        ...changed,
+        terminal: { ...changed.terminal, cwd: "/Users/codra/private" },
+      }),
+    ).toThrow();
+  });
 });
