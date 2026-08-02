@@ -1,4 +1,9 @@
-import type { RemoteHostStatus, TerminalDescriptor } from "@codra/protocol";
+import type {
+  RemoteAccountStatus,
+  RemoteAuthProvider,
+  RemoteHostStatus,
+  TerminalDescriptor,
+} from "@codra/protocol";
 import React from "react";
 
 export interface TerminalSidebarProps {
@@ -7,8 +12,11 @@ export interface TerminalSidebarProps {
   onCreate?: () => void;
   onSelect?: (terminalId: string) => void;
   onClose?: (terminalId: string) => void;
+  accountStatus?: RemoteAccountStatus;
   remoteStatus?: RemoteHostStatus;
-  onRemoteLogin?: () => void;
+  onRemoteLogin?: (provider: RemoteAuthProvider) => void;
+  onRemoteActivate?: () => void;
+  onRemoteDeactivate?: () => void;
 }
 
 function cwdBasename(cwd: string): string {
@@ -22,14 +30,17 @@ export function TerminalSidebar({
   onCreate,
   onSelect,
   onClose,
+  accountStatus = { state: "signed_out" },
   remoteStatus = { state: "idle" },
   onRemoteLogin,
+  onRemoteActivate,
+  onRemoteDeactivate,
 }: TerminalSidebarProps) {
-  const [providerMenuOpen, setProviderMenuOpen] = React.useState(false);
+  const [providerDialogOpen, setProviderDialogOpen] = React.useState(false);
 
-  function chooseGoogle(): void {
-    setProviderMenuOpen(false);
-    onRemoteLogin?.();
+  function chooseProvider(provider: RemoteAuthProvider): void {
+    setProviderDialogOpen(false);
+    onRemoteLogin?.(provider);
   }
 
   return (
@@ -116,16 +127,24 @@ export function TerminalSidebar({
             <span className="remote-state" data-state={remoteStatus.state}>
               {remoteStatus.state === "online"
                 ? "Online"
-                : remoteStatus.state === "signing_in"
-                  ? "Signing in"
+                : remoteStatus.state === "activating"
+                  ? "Activating"
                   : remoteStatus.state === "error"
                     ? "Needs attention"
                     : "Offline"}
             </span>
           </div>
-          {remoteStatus.state === "signing_in" ? (
+          {accountStatus.state === "signing_in" ? (
             <p className="remote-message" role="status">
               브라우저에서 Google 로그인 중…
+            </p>
+          ) : accountStatus.state === "error" ? (
+            <p className="remote-message" role="alert">
+              {accountStatus.message ?? "계정 로그인에 실패했습니다."}
+            </p>
+          ) : remoteStatus.state === "activating" ? (
+            <p className="remote-message" role="status">
+              원격 호스트 활성화 중…
             </p>
           ) : remoteStatus.state === "online" ? (
             <p className="remote-message" role="status">
@@ -133,27 +152,79 @@ export function TerminalSidebar({
             </p>
           ) : remoteStatus.state === "error" ? (
             <p className="remote-message" role="alert">
-              {remoteStatus.message ?? "원격 로그인에 실패했습니다."}
+              {remoteStatus.message ?? "원격 활성화에 실패했습니다."}
+            </p>
+          ) : accountStatus.state === "signed_in" ? (
+            <p className="remote-message" role="status">
+              이 컴퓨터를 원격 호스트로 활성화할 수 있습니다.
             </p>
           ) : null}
 
+          {accountStatus.state === "signed_in" &&
+          remoteStatus.state !== "online" &&
+          remoteStatus.state !== "activating" ? (
+            <button
+              className="remote-action-button"
+              type="button"
+              onClick={onRemoteActivate}
+            >
+              원격 활성화
+            </button>
+          ) : remoteStatus.state === "online" ? (
+            <button
+              className="remote-action-button remote-action-button-secondary"
+              type="button"
+              onClick={onRemoteDeactivate}
+            >
+              원격 비활성화
+            </button>
+          ) : null}
+
           <div className="remote-account-footer">
-            {providerMenuOpen ? (
+            {providerDialogOpen ? (
               <div
-                className="remote-provider-menu"
-                role="menu"
-                aria-label="로그인 제공자"
+                className="remote-provider-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label="로그인 방법 선택"
               >
+                <div className="remote-provider-dialog-heading">
+                  <span>로그인 방법</span>
+                  <button
+                    className="remote-provider-dialog-close"
+                    type="button"
+                    aria-label="로그인 방법 닫기"
+                    onClick={() => setProviderDialogOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
                 <button
                   className="remote-provider-button"
                   type="button"
-                  role="menuitem"
-                  onClick={chooseGoogle}
+                  onClick={() => chooseProvider("google")}
                 >
                   <span className="remote-provider-icon" aria-hidden="true">
                     G
                   </span>
-                  Google
+                  <span>
+                    <strong>Google</strong>
+                    <small>권장 로그인</small>
+                  </span>
+                </button>
+                <button
+                  className="remote-provider-button"
+                  type="button"
+                  disabled
+                  aria-label="이메일 및 비밀번호 테스트 전용"
+                >
+                  <span className="remote-provider-icon" aria-hidden="true">
+                    @
+                  </span>
+                  <span>
+                    <strong>이메일 / 비밀번호</strong>
+                    <small>테스트 전용</small>
+                  </span>
                 </button>
               </div>
             ) : null}
@@ -161,17 +232,17 @@ export function TerminalSidebar({
               className="remote-avatar-button"
               type="button"
               aria-label="로그인 계정"
-              aria-expanded={providerMenuOpen}
-              onClick={() => setProviderMenuOpen((open) => !open)}
+              aria-expanded={providerDialogOpen}
+              onClick={() => setProviderDialogOpen((open) => !open)}
             >
               <span className="remote-avatar" aria-hidden="true">
                 C
               </span>
               <span className="remote-avatar-copy">
-                {remoteStatus.state === "online" ? "CODRA 계정" : "로그인"}
+                {accountStatus.state === "signed_in" ? "CODRA 계정" : "로그인"}
               </span>
               <span className="remote-avatar-chevron" aria-hidden="true">
-                {providerMenuOpen ? "⌃" : "⌄"}
+                {providerDialogOpen ? "⌃" : "⌄"}
               </span>
             </button>
           </div>

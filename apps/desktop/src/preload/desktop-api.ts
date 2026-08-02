@@ -1,6 +1,8 @@
 import {
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
+  RemoteAccountStatusSchema,
+  RemoteAuthProviderSchema,
   ReplayTerminalRequestSchema,
   RemoteHostStatusSchema,
   ResizeTerminalRequestSchema,
@@ -104,9 +106,27 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
           await ipc.invoke(IPC_CHANNELS.remoteGetState),
         );
       },
-      async login() {
+      async getAuthState() {
+        return RemoteAccountStatusSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteGetAuthState),
+        );
+      },
+      async login(provider) {
+        return RemoteAccountStatusSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.remoteLogin,
+            RemoteAuthProviderSchema.parse(provider),
+          ),
+        );
+      },
+      async activate() {
         return RemoteHostStatusSchema.parse(
-          await ipc.invoke(IPC_CHANNELS.remoteLogin),
+          await ipc.invoke(IPC_CHANNELS.remoteActivate),
+        );
+      },
+      async deactivate() {
+        return RemoteHostStatusSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteDeactivate),
         );
       },
       onStateChanged(listener) {
@@ -117,6 +137,15 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
 
         ipc.on(IPC_CHANNELS.remoteState, wrapped);
         return () => ipc.removeListener(IPC_CHANNELS.remoteState, wrapped);
+      },
+      onAuthStateChanged(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = RemoteAccountStatusSchema.safeParse(payload);
+          if (parsed.success) listener(parsed.data);
+        };
+
+        ipc.on(IPC_CHANNELS.remoteAuthState, wrapped);
+        return () => ipc.removeListener(IPC_CHANNELS.remoteAuthState, wrapped);
       },
     },
   };

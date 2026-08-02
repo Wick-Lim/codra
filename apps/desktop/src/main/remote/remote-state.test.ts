@@ -9,7 +9,7 @@ describe("remote host state", () => {
     });
     expect(remoteErrorStatus(new Error("private token abc"))).toEqual({
       state: "error",
-      message: "REMOTE_LOGIN_FAILED",
+      message: "REMOTE_ACTIVATION_FAILED",
     });
   });
 });

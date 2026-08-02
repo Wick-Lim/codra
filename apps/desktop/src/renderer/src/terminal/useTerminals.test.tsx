@@ -43,8 +43,12 @@ function createDesktopApiFake() {
     },
     remote: {
       getState: vi.fn().mockResolvedValue({ state: "idle" }),
-      login: vi.fn().mockResolvedValue({ state: "online" }),
+      getAuthState: vi.fn().mockResolvedValue({ state: "signed_out" }),
+      login: vi.fn().mockResolvedValue({ state: "signed_in" }),
+      activate: vi.fn().mockResolvedValue({ state: "online" }),
+      deactivate: vi.fn().mockResolvedValue({ state: "idle" }),
       onStateChanged: vi.fn(() => vi.fn()),
+      onAuthStateChanged: vi.fn(() => vi.fn()),
     },
   };
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   IPC_CHANNELS,
+  type RemoteAccountStatus,
   type RemoteHostStatus,
   type TerminalDescriptor,
 } from "@codra/protocol";
@@ -51,30 +52,47 @@ const descriptor: TerminalDescriptor = {
 };
 
 describe("createDesktopApi", () => {
-  it("routes remote login actions and filters remote state events", async () => {
+  it("routes account login and host activation independently", async () => {
     const ipc = new FakeIpcRenderer(
       new Map<string, unknown>([
         [IPC_CHANNELS.remoteGetState, { state: "idle" }],
-        [IPC_CHANNELS.remoteLogin, { state: "online" }],
+        [IPC_CHANNELS.remoteGetAuthState, { state: "signed_out" }],
+        [IPC_CHANNELS.remoteLogin, { state: "signed_in" }],
+        [IPC_CHANNELS.remoteActivate, { state: "online" }],
+        [IPC_CHANNELS.remoteDeactivate, { state: "idle" }],
       ]),
     );
     const api = createDesktopApi(ipc);
     const received: RemoteHostStatus[] = [];
+    const receivedAuth: RemoteAccountStatus[] = [];
     api.remote.onStateChanged((status) => received.push(status));
+    api.remote.onAuthStateChanged((status) => receivedAuth.push(status));
 
     await expect(api.remote.getState()).resolves.toEqual({ state: "idle" });
-    await expect(api.remote.login()).resolves.toEqual({ state: "online" });
-    ipc.emit(IPC_CHANNELS.remoteState, { state: "signing_in" });
+    await expect(api.remote.getAuthState()).resolves.toEqual({
+      state: "signed_out",
+    });
+    await expect(api.remote.login("google")).resolves.toEqual({
+      state: "signed_in",
+    });
+    await expect(api.remote.activate()).resolves.toEqual({ state: "online" });
+    await expect(api.remote.deactivate()).resolves.toEqual({ state: "idle" });
+    ipc.emit(IPC_CHANNELS.remoteState, { state: "activating" });
     ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "" });
-    ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "REMOTE_LOGIN_FAILED" });
+    ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "REMOTE_ACTIVATION_FAILED" });
+    ipc.emit(IPC_CHANNELS.remoteAuthState, { state: "signed_in" });
 
     expect(received).toEqual([
-      { state: "signing_in" },
-      { state: "error", message: "REMOTE_LOGIN_FAILED" },
+      { state: "activating" },
+      { state: "error", message: "REMOTE_ACTIVATION_FAILED" },
     ]);
-    expect(ipc.invocations.slice(-2)).toEqual([
+    expect(receivedAuth).toEqual([{ state: "signed_in" }]);
+    expect(ipc.invocations.slice(-5)).toEqual([
       { channel: IPC_CHANNELS.remoteGetState, args: [] },
-      { channel: IPC_CHANNELS.remoteLogin, args: [] },
+      { channel: IPC_CHANNELS.remoteGetAuthState, args: [] },
+      { channel: IPC_CHANNELS.remoteLogin, args: ["google"] },
+      { channel: IPC_CHANNELS.remoteActivate, args: [] },
+      { channel: IPC_CHANNELS.remoteDeactivate, args: [] },
     ]);
   });
 

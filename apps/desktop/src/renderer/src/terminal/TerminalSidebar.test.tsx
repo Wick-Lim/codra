@@ -111,8 +111,12 @@ function createPaneApi(
     },
     remote: {
       getState: vi.fn().mockResolvedValue({ state: "idle" }),
-      login: vi.fn().mockResolvedValue({ state: "online" }),
+      getAuthState: vi.fn().mockResolvedValue({ state: "signed_out" }),
+      login: vi.fn().mockResolvedValue({ state: "signed_in" }),
+      activate: vi.fn().mockResolvedValue({ state: "online" }),
+      deactivate: vi.fn().mockResolvedValue({ state: "idle" }),
       onStateChanged: vi.fn(() => vi.fn()),
+      onAuthStateChanged: vi.fn(() => vi.fn()),
     },
   };
 
@@ -176,7 +180,7 @@ const exitedTerminal: TerminalDescriptor = {
 };
 
 describe("TerminalSidebar", () => {
-  it("opens a provider menu from the bottom-left account avatar", async () => {
+  it("opens a provider dialog from the bottom-left account avatar", async () => {
     const onRemoteLogin = vi.fn();
     const { rerender } = render(
       <TerminalSidebar
@@ -187,22 +191,22 @@ describe("TerminalSidebar", () => {
       />,
     );
 
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "로그인 계정" }));
-    expect(screen.getByRole("menu", { name: "로그인 제공자" })).toBeVisible();
-    await userEvent.click(screen.getByRole("menuitem", { name: "Google" }));
-    expect(onRemoteLogin).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog", { name: "로그인 방법 선택" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Google/ }));
+    expect(onRemoteLogin).toHaveBeenCalledWith("google");
 
     rerender(
       <TerminalSidebar
         terminals={[]}
         activeId={null}
-        remoteStatus={{ state: "signing_in" }}
+        accountStatus={{ state: "signing_in" }}
         onRemoteLogin={onRemoteLogin}
       />,
     );
     expect(screen.getByText("브라우저에서 Google 로그인 중…")).toBeVisible();
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
 
     const online: RemoteHostStatus = { state: "online" };
     rerender(
@@ -784,7 +788,7 @@ describe("App terminal workspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("100 × 30");
   });
 
-  it("loads remote state and starts the system-browser login from the panel", async () => {
+  it("opens provider dialog and keeps login separate from activation", async () => {
     const api = createPaneApi();
     Object.defineProperty(window, "codra", {
       configurable: true,
@@ -793,10 +797,10 @@ describe("App terminal workspace", () => {
 
     render(React.createElement(App));
 
-    await userEvent.click(
-      await screen.findByRole("button", { name: "로그인 계정" }),
-    );
-    await userEvent.click(screen.getByRole("menuitem", { name: "Google" }));
-    expect(api.remote.login).toHaveBeenCalledOnce();
+    await userEvent.click(await screen.findByRole("button", { name: "로그인 계정" }));
+    expect(screen.getByRole("dialog", { name: "로그인 방법 선택" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: /Google/ }));
+    expect(api.remote.login).toHaveBeenCalledWith("google");
+    expect(api.remote.activate).not.toHaveBeenCalled();
   });
 });

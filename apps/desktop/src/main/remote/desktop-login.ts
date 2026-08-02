@@ -45,6 +45,7 @@ export interface DesktopLoginBootstrapResult {
 export interface DesktopLoginBootstrapOptions {
   identity: HostIdentity;
   action: DesktopLoginAction;
+  useExistingAuth?: boolean;
 }
 
 export function shouldRetryDesktopLoginAsRegister(
@@ -514,12 +515,76 @@ async function cancelDesktopLogin(
   }
 }
 
+export async function bootstrapProductionDesktopAuth(
+  runtime: FirebaseRuntime,
+  overrides: Partial<DesktopLoginDependencies> = {},
+): Promise<void> {
+  if (runtime.deployment.mode !== "production")
+    throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
+  const dependencies = { ...desktopLoginDefaults, ...overrides };
+  const attemptId = dependencies.randomUUID();
+  let state = createPkceVerifier(dependencies.randomBytes(32));
+  let listener: DesktopLoginCallbackListener | undefined;
+  const abort = new AbortController();
+  let rejectDeadline!: (error: Error) => void;
+  const deadline = new Promise<never>((_, reject) => {
+    rejectDeadline = reject;
+  });
+  void deadline.catch(() => undefined);
+  const deadlineTimer = setTimeout(() => {
+    abort.abort();
+    rejectDeadline(new Error("DESKTOP_LOGIN_TIMEOUT"));
+  }, dependencies.timeoutMs);
+  const bounded = <T>(work: Promise<T>): Promise<T> =>
+    Promise.race([work, deadline]);
+  try {
+    listener = await bounded(
+      createDesktopLoginCallbackListener({
+        attemptId,
+        state,
+        timeoutMs: dependencies.timeoutMs,
+      }),
+    );
+    const callbackUrl = `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`;
+    const googleAuthUri = await bounded(
+      createDesktopLoginGoogleAuthUri(
+        runtime,
+        dependencies,
+        callbackUrl,
+        state,
+        abort.signal,
+      ),
+    );
+    await bounded(dependencies.openExternal(googleAuthUri));
+    const callback = await bounded(listener.waitForCallback());
+    await bounded(
+      completeDesktopLoginGoogleAuth(
+        runtime,
+        dependencies,
+        callbackUrl,
+        state,
+        callback.code,
+        callback.state,
+        callback.postBody,
+        abort.signal,
+      ),
+    );
+  } finally {
+    clearTimeout(deadlineTimer);
+    await listener?.close();
+    state = "";
+  }
+}
+
 export async function bootstrapProductionDesktopLogin(
   runtime: FirebaseRuntime,
   options: DesktopLoginBootstrapOptions,
   overrides: Partial<DesktopLoginDependencies> = {},
 ): Promise<DesktopLoginBootstrapResult> {
   const dependencies = { ...desktopLoginDefaults, ...overrides };
+  const useExistingAuth = options.useExistingAuth === true;
+  if (useExistingAuth && !runtime.auth.currentUser)
+    throw new Error("REMOTE_AUTH_REQUIRED");
   const attemptId = dependencies.randomUUID();
   let state = createPkceVerifier(dependencies.randomBytes(32));
   let verifier = createPkceVerifier(dependencies.randomBytes(32));
@@ -544,17 +609,20 @@ export async function bootstrapProductionDesktopLogin(
   const bounded = <T>(work: Promise<T>): Promise<T> =>
     Promise.race([work, deadline]);
   try {
-    listener = await bounded(
-      createDesktopLoginCallbackListener({
-        attemptId,
-        state,
-        timeoutMs: dependencies.timeoutMs,
-      }),
-    );
-    callbackResult = listener.waitForCallback().then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error }),
-    );
+    if (!useExistingAuth) {
+      listener = await bounded(
+        createDesktopLoginCallbackListener({
+          attemptId,
+          state,
+          timeoutMs: dependencies.timeoutMs,
+        }),
+      );
+      callbackResult = listener.waitForCallback().then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+    }
+    const callbackPort = listener?.port ?? DESKTOP_LOGIN_CALLBACK_PORT;
     const unsignedStart = {
       attemptId,
       action: options.action,
@@ -565,7 +633,7 @@ export async function bootstrapProductionDesktopLogin(
       pkceChallenge: createPkceChallenge(verifier),
       stateHash: sha256Base64Url(state),
       nonce,
-      callbackPort: listener.port,
+      callbackPort,
       callbackPath: CALLBACK_PATH,
       startSignature: PLACEHOLDER_SIGNATURE,
     };
@@ -590,48 +658,52 @@ export async function bootstrapProductionDesktopLogin(
         ? (startResponse as { serverNonce?: unknown }).serverNonce
         : undefined;
     if (serverNonce !== nonce) throw new Error("DESKTOP_LOGIN_START_INVALID");
-    const callbackUrl = new URL(
-      `http://127.0.0.1:${listener.port}${CALLBACK_PATH}`,
-    );
-    const googleAuthUri = await bounded(
-      createDesktopLoginGoogleAuthUri(
-        runtime,
-        dependencies,
-        callbackUrl.toString(),
-        state,
-        abort.signal,
-      ),
-    );
-    await bounded(dependencies.openExternal(googleAuthUri));
-    const callbackOutcome = await bounded(callbackResult);
-    if ("error" in callbackOutcome) throw callbackOutcome.error;
-    const callback = callbackOutcome.value;
-    await bounded(
-      completeDesktopLoginGoogleAuth(
-        runtime,
-        dependencies,
-        callbackUrl.toString(),
-        state,
-        callback.code,
-        callback.state,
-        callback.postBody,
-        abort.signal,
-      ),
-    );
+    let callback: DesktopLoginCallback | undefined;
+    if (!useExistingAuth) {
+      const callbackUrl = new URL(
+        `http://127.0.0.1:${listener!.port}${CALLBACK_PATH}`,
+      );
+      const googleAuthUri = await bounded(
+        createDesktopLoginGoogleAuthUri(
+          runtime,
+          dependencies,
+          callbackUrl.toString(),
+          state,
+          abort.signal,
+        ),
+      );
+      await bounded(dependencies.openExternal(googleAuthUri));
+      const callbackOutcome = await bounded(callbackResult!);
+      if ("error" in callbackOutcome) throw callbackOutcome.error;
+      callback = callbackOutcome.value;
+      await bounded(
+        completeDesktopLoginGoogleAuth(
+          runtime,
+          dependencies,
+          callbackUrl.toString(),
+          state,
+          callback.code,
+          callback.state,
+          callback.postBody,
+          abort.signal,
+        ),
+      );
+    }
     const authorize = httpsCallable(runtime.functions, "authorizeDesktopLogin");
     const authorization = DesktopLoginAllowResponseSchema.parse(
       (
         await bounded(
           authorize({
             action: "allow",
-            attemptId: callback.attemptId,
+            attemptId: callback?.attemptId ?? attemptId,
             state,
           }),
         )
       ).data,
     );
+    const authorizedAttemptId = callback?.attemptId ?? attemptId;
     const unsignedRedeem = {
-      attemptId: callback.attemptId,
+      attemptId: authorizedAttemptId,
       code: authorization.code,
       state: authorization.state,
       nonce,
@@ -641,7 +713,7 @@ export async function bootstrapProductionDesktopLogin(
     const deviceSignature = await signCanonicalPayload(
       options.identity.privateKey,
       createDesktopLoginDeviceSignaturePayload({
-        attemptId: callback.attemptId,
+        attemptId: authorizedAttemptId,
         code: authorization.code,
         state: authorization.state,
         nonce,

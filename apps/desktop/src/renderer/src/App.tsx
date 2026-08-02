@@ -1,5 +1,9 @@
 import React from "react";
-import type { RemoteHostStatus } from "@codra/protocol";
+import type {
+  RemoteAccountStatus,
+  RemoteAuthProvider,
+  RemoteHostStatus,
+} from "@codra/protocol";
 import { TerminalPane } from "./terminal/TerminalPane";
 import { TerminalSidebar } from "./terminal/TerminalSidebar";
 import { useTerminals } from "./terminal/useTerminals";
@@ -16,26 +20,64 @@ export default function App() {
   const [remoteStatus, setRemoteStatus] = React.useState<RemoteHostStatus>({
     state: "idle",
   });
+  const [accountStatus, setAccountStatus] = React.useState<RemoteAccountStatus>(
+    { state: "signed_out" },
+  );
 
   React.useEffect(() => {
     const stopListening = window.codra.remote.onStateChanged(setRemoteStatus);
+    const stopListeningAccount = window.codra.remote.onAuthStateChanged(
+      setAccountStatus,
+    );
     void window.codra.remote
       .getState()
       .then(setRemoteStatus)
-      .catch(() => setRemoteStatus({ state: "error", message: "REMOTE_STATUS_UNAVAILABLE" }));
-    return stopListening;
+      .catch(() =>
+        setRemoteStatus({ state: "error", message: "REMOTE_STATUS_UNAVAILABLE" }),
+      );
+    void window.codra.remote
+      .getAuthState()
+      .then(setAccountStatus)
+      .catch(() =>
+        setAccountStatus({ state: "error", message: "REMOTE_AUTH_UNAVAILABLE" }),
+      );
+    return () => {
+      stopListening();
+      stopListeningAccount();
+    };
   }, []);
 
-  async function loginRemote(): Promise<void> {
-    setRemoteStatus({ state: "signing_in" });
+  async function loginRemote(provider: RemoteAuthProvider): Promise<void> {
+    setAccountStatus({ state: "signing_in" });
     try {
-      setRemoteStatus(await window.codra.remote.login());
+      setAccountStatus(await window.codra.remote.login(provider));
+    } catch {
+      try {
+        setAccountStatus(await window.codra.remote.getAuthState());
+      } catch {
+        setAccountStatus({ state: "error", message: "REMOTE_AUTH_FAILED" });
+      }
+    }
+  }
+
+  async function activateRemote(): Promise<void> {
+    setRemoteStatus({ state: "activating" });
+    try {
+      setRemoteStatus(await window.codra.remote.activate());
     } catch {
       try {
         setRemoteStatus(await window.codra.remote.getState());
       } catch {
-        setRemoteStatus({ state: "error", message: "REMOTE_LOGIN_FAILED" });
+        setRemoteStatus({ state: "error", message: "REMOTE_ACTIVATION_FAILED" });
       }
+    }
+  }
+
+  async function deactivateRemote(): Promise<void> {
+    try {
+      setRemoteStatus(await window.codra.remote.deactivate());
+    } catch {
+      setRemoteStatus({ state: "error", message: "REMOTE_DEACTIVATION_FAILED" });
     }
   }
   const stateLabel = activeTerminal
@@ -54,8 +96,11 @@ export default function App() {
             onCreate={() => void createTerminal()}
             onSelect={selectTerminal}
             onClose={(terminalId) => void closeTerminal(terminalId)}
+            accountStatus={accountStatus}
             remoteStatus={remoteStatus}
-            onRemoteLogin={() => void loginRemote()}
+            onRemoteLogin={(provider) => void loginRemote(provider)}
+            onRemoteActivate={() => void activateRemote()}
+            onRemoteDeactivate={() => void deactivateRemote()}
           />
 
           <section

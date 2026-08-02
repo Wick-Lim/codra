@@ -10,7 +10,7 @@ import type {
 
 export const RemoteHostStateSchema = z.enum([
   "idle",
-  "signing_in",
+  "activating",
   "online",
   "error",
 ]);
@@ -24,6 +24,25 @@ export const RemoteHostStatusSchema = z
   .strict();
 export type RemoteHostStatus = z.infer<typeof RemoteHostStatusSchema>;
 
+export const RemoteAuthProviderSchema = z.enum(["google", "email_password"]);
+export type RemoteAuthProvider = z.infer<typeof RemoteAuthProviderSchema>;
+
+export const RemoteAccountStateSchema = z.enum([
+  "signed_out",
+  "signing_in",
+  "signed_in",
+  "error",
+]);
+export type RemoteAccountState = z.infer<typeof RemoteAccountStateSchema>;
+
+export const RemoteAccountStatusSchema = z
+  .object({
+    state: RemoteAccountStateSchema,
+    message: z.string().min(1).max(160).optional(),
+  })
+  .strict();
+export type RemoteAccountStatus = z.infer<typeof RemoteAccountStatusSchema>;
+
 export const IPC_CHANNELS = {
   terminalList: "codra:terminal:list",
   terminalCreate: "codra:terminal:create",
@@ -34,8 +53,12 @@ export const IPC_CHANNELS = {
   terminalOutput: "codra:terminal:output",
   terminalChanged: "codra:terminal:changed",
   remoteGetState: "codra:remote:get-state",
+  remoteGetAuthState: "codra:remote:get-auth-state",
   remoteLogin: "codra:remote:login",
+  remoteActivate: "codra:remote:activate",
+  remoteDeactivate: "codra:remote:deactivate",
   remoteState: "codra:remote:state",
+  remoteAuthState: "codra:remote:auth-state",
 } as const;
 
 export interface CodraDesktopApi {
@@ -51,7 +74,13 @@ export interface CodraDesktopApi {
   };
   remote: {
     getState(): Promise<RemoteHostStatus>;
-    login(): Promise<RemoteHostStatus>;
+    getAuthState(): Promise<RemoteAccountStatus>;
+    login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus>;
+    activate(): Promise<RemoteHostStatus>;
+    deactivate(): Promise<RemoteHostStatus>;
     onStateChanged(listener: (status: RemoteHostStatus) => void): () => void;
+    onAuthStateChanged(
+      listener: (status: RemoteAccountStatus) => void,
+    ): () => void;
   };
 }

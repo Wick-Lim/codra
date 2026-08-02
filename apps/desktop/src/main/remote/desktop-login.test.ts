@@ -369,7 +369,7 @@ describe("desktop login loopback", () => {
         {
           fetch,
           openExternal: async () => undefined,
-          timeoutMs: 25,
+          timeoutMs: 100,
         },
       ),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
@@ -440,7 +440,7 @@ describe("desktop login loopback", () => {
         {
           fetch,
           openExternal: () => new Promise<void>(() => undefined),
-          timeoutMs: 25,
+          timeoutMs: 100,
         },
       ),
     ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");

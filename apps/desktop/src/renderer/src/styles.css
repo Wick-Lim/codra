@@ -409,6 +409,10 @@ button:focus-visible {
   color: var(--accent-cyan);
 }
 
+.remote-state[data-state="activating"] {
+  color: var(--accent-cyan);
+}
+
 .remote-state[data-state="error"] {
   color: #f2b880;
 }
@@ -418,6 +422,35 @@ button:focus-visible {
   color: var(--text-muted);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.remote-action-button {
+  min-height: 30px;
+  padding: 5px 8px;
+  color: var(--graphite-950);
+  background: var(--accent-cyan);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.remote-action-button:hover {
+  background: #a7f5f1;
+}
+
+.remote-action-button-secondary {
+  color: var(--text-primary);
+  background: transparent;
+  border-color: var(--hairline);
+}
+
+.remote-action-button-secondary:hover {
+  color: var(--text-primary);
+  background: var(--graphite-800);
+  border-color: var(--accent-cyan);
 }
 
 .remote-account-footer {
@@ -473,7 +506,7 @@ button:focus-visible {
   line-height: 1;
 }
 
-.remote-provider-menu {
+.remote-provider-dialog {
   position: absolute;
   right: 0;
   bottom: calc(100% + 7px);
@@ -486,6 +519,27 @@ button:focus-visible {
   border: 1px solid var(--hairline);
   border-radius: 3px;
   box-shadow: 0 8px 20px rgb(0 0 0 / 30%);
+}
+
+.remote-provider-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 7px 7px;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.remote-provider-dialog-close {
+  padding: 0 3px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .remote-provider-button {
@@ -501,6 +555,23 @@ button:focus-visible {
   font-size: 11px;
   text-align: left;
   cursor: pointer;
+}
+
+.remote-provider-button:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.remote-provider-button > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.remote-provider-button small {
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 500;
 }
 
 .remote-provider-button:hover {

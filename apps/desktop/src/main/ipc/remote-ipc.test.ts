@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   IPC_CHANNELS,
+  type RemoteAccountStatus,
   type RemoteHostStatus,
 } from "@codra/protocol";
 import { registerRemoteIpc } from "./remote-ipc";
@@ -34,11 +35,25 @@ function sender() {
 
 function controller() {
   let status: RemoteHostStatus = { state: "idle" };
+  let accountStatus: RemoteAccountStatus = { state: "signed_out" };
   let listener: ((next: RemoteHostStatus) => void) | undefined;
+  let accountListener: ((next: RemoteAccountStatus) => void) | undefined;
   return {
     getStatus: () => status,
-    login: vi.fn(async () => {
+    getAccountStatus: () => accountStatus,
+    login: vi.fn(async (provider: "google" | "email_password") => {
+      expect(provider).toBe("google");
+      accountStatus = { state: "signed_in" };
+      accountListener?.(accountStatus);
+      return accountStatus;
+    }),
+    activate: vi.fn(async () => {
       status = { state: "online" };
+      listener?.(status);
+      return status;
+    }),
+    deactivate: vi.fn(async () => {
+      status = { state: "idle" };
       listener?.(status);
       return status;
     }),
@@ -46,6 +61,12 @@ function controller() {
       listener = next;
       return () => {
         listener = undefined;
+      };
+    },
+    onAccountStatusChanged: (next: (value: RemoteAccountStatus) => void) => {
+      accountListener = next;
+      return () => {
+        accountListener = undefined;
       };
     },
     emit(next: RemoteHostStatus) {
@@ -56,7 +77,7 @@ function controller() {
 }
 
 describe("registerRemoteIpc", () => {
-  it("returns state, starts login, and broadcasts validated state changes", async () => {
+  it("routes account login and host activation independently", async () => {
     const ipc = new FakeIpc();
     const host = controller();
     const client = sender();
@@ -70,18 +91,38 @@ describe("registerRemoteIpc", () => {
     expect(ipc.handlers.get(IPC_CHANNELS.remoteGetState)?.(client.event)).toEqual({
       state: "idle",
     });
+    expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteGetAuthState)?.(client.event),
+    ).toEqual({ state: "signed_out" });
     await expect(
-      ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event),
-    ).resolves.toEqual({ state: "online" });
+      ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event, "google"),
+    ).resolves.toEqual({ state: "signed_in" });
     expect(host.login).toHaveBeenCalledOnce();
     expect(client.sends).toEqual([
-      { channel: IPC_CHANNELS.remoteState, payload: { state: "online" } },
+      {
+        channel: IPC_CHANNELS.remoteAuthState,
+        payload: { state: "signed_in" },
+      },
     ]);
 
-    host.emit({ state: "error", message: "REMOTE_LOGIN_FAILED" });
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteActivate)?.(client.event),
+    ).resolves.toEqual({ state: "online" });
+    expect(host.activate).toHaveBeenCalledOnce();
     expect(client.sends.at(-1)).toEqual({
       channel: IPC_CHANNELS.remoteState,
-      payload: { state: "error", message: "REMOTE_LOGIN_FAILED" },
+      payload: { state: "online" },
+    });
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteDeactivate)?.(client.event),
+    ).resolves.toEqual({ state: "idle" });
+    expect(host.deactivate).toHaveBeenCalledOnce();
+
+    host.emit({ state: "error", message: "REMOTE_ACTIVATION_FAILED" });
+    expect(client.sends.at(-1)).toEqual({
+      channel: IPC_CHANNELS.remoteState,
+      payload: { state: "error", message: "REMOTE_ACTIVATION_FAILED" },
     });
 
     cleanup();
@@ -100,7 +141,7 @@ describe("registerRemoteIpc", () => {
     });
 
     await expect(
-      ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event),
+      ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event, "google"),
     ).rejects.toThrow("Unauthorized terminal IPC sender");
     expect(host.login).not.toHaveBeenCalled();
   });
