@@ -34,8 +34,36 @@ const CANCEL_TIMEOUT_MS = 1_000;
 const MAX_CALLBACK_TARGET_BYTES = 4 * 1024;
 const PLACEHOLDER_SIGNATURE = encodeBase64Url(new Uint8Array(64));
 
-const CALLBACK_SUCCESS_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>CODRA sign-in complete</title></head><body><p>You can return to CODRA.</p></body></html>`;
-const CALLBACK_CANCELLED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>CODRA sign-in cancelled</title></head><body><p>Sign-in was cancelled. You can return to CODRA.</p></body></html>`;
+const CALLBACK_PAGE_TEXT = {
+  complete: {
+    title: "CODRA sign-in complete",
+    heading: "Signed in",
+    detail: "You can return to CODRA.",
+  },
+  cancelled: {
+    title: "CODRA sign-in cancelled",
+    heading: "Sign-in cancelled",
+    detail: "Sign-in was cancelled. You can return to CODRA.",
+  },
+} as const;
+
+type CallbackPageVariant = keyof typeof CALLBACK_PAGE_TEXT;
+
+const CALLBACK_PAGE_STYLE = `:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:16px/1.5 -apple-system,system-ui,sans-serif}main{max-width:26rem;padding:2rem;text-align:center}h1{margin:0 0 .5rem;font-size:1.25rem}p{margin:0 0 1.5rem;opacity:.8}button{font:inherit;padding:.6rem 1.2rem;border:0;border-radius:.5rem;background:#2f6feb;color:#fff;cursor:pointer}#hint{margin:1rem 0 0;font-size:.875rem}#hint[hidden]{display:none}`;
+
+const CALLBACK_PAGE_SCRIPT = `(function(){var button=document.getElementById("return");var hint=document.getElementById("hint");function finish(){window.close();window.setTimeout(function(){if(!window.closed)hint.hidden=false;},400);}button.addEventListener("click",finish);finish();})();`;
+
+function callbackContentSecurityPolicy(nonce: string): string {
+  return `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'`;
+}
+
+function renderCallbackPage(
+  variant: CallbackPageVariant,
+  nonce: string,
+): string {
+  const text = CALLBACK_PAGE_TEXT[variant];
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${text.title}</title><style nonce="${nonce}">${CALLBACK_PAGE_STYLE}</style></head><body><main><h1>${text.heading}</h1><p>${text.detail}</p><button id="return" type="button">Return to CODRA</button><p id="hint" hidden>Close this tab manually if it stays open.</p></main><script nonce="${nonce}">${CALLBACK_PAGE_SCRIPT}</script></body></html>`;
+}
 
 export interface DesktopLoginBootstrapResult {
   token: string;
@@ -248,6 +276,23 @@ function sendLoopbackError(response: ServerResponse, status: number): void {
   response.end("Invalid CODRA sign-in callback.");
 }
 
+function sendCallbackPage(
+  response: ServerResponse,
+  variant: CallbackPageVariant,
+  onFinish: () => void,
+): void {
+  const nonce = encodeBase64Url(randomBytes(16));
+  response.writeHead(200, {
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": callbackContentSecurityPolicy(nonce),
+    "Content-Type": "text/html; charset=utf-8",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+  });
+  response.once("finish", onFinish);
+  response.end(renderCallbackPage(variant, nonce));
+}
+
 function closeServer(server: Server, sockets: Set<Socket>): Promise<void> {
   for (const socket of sockets) socket.destroy();
   return new Promise((resolve) => {
@@ -300,17 +345,10 @@ export async function createDesktopLoginCallbackListener(options: {
     if (isDesktopLoginCancellation(request, { port })) {
       settled = true;
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      response.writeHead(200, {
-        "Cache-Control": "no-store",
-        "Content-Type": "text/html; charset=utf-8",
-        "Referrer-Policy": "no-referrer",
-        "X-Content-Type-Options": "nosniff",
-      });
-      response.once("finish", () => {
+      sendCallbackPage(response, "cancelled", () => {
         rejectCallback(new Error("DESKTOP_LOGIN_CANCELLED"));
         void close();
       });
-      response.end(CALLBACK_CANCELLED_HTML);
       return;
     }
     const accepted = parseDesktopLoginCallback(request, {
@@ -324,17 +362,10 @@ export async function createDesktopLoginCallbackListener(options: {
     }
     settled = true;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    response.writeHead(200, {
-      "Cache-Control": "no-store",
-      "Content-Type": "text/html; charset=utf-8",
-      "Referrer-Policy": "no-referrer",
-      "X-Content-Type-Options": "nosniff",
-    });
-    response.once("finish", () => {
+    sendCallbackPage(response, "complete", () => {
       resolveCallback(accepted);
       void close();
     });
-    response.end(CALLBACK_SUCCESS_HTML);
   });
   server.on("connection", (socket) => {
     sockets.add(socket);

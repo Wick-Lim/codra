@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { request as httpRequest } from "node:http";
+import { type IncomingHttpHeaders, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import type { FirebaseRuntime } from "@codra/firebase";
@@ -26,6 +26,9 @@ import type { HostIdentity } from "./host-identity";
 const attemptId = "d9c3a142-3f0e-4ab2-867d-8112f0e5c162";
 const state = createPkceVerifier(new Uint8Array(32).fill(1));
 const code = createPkceVerifier(new Uint8Array(32).fill(2));
+const CALLBACK_CSP_PATTERN =
+  /^default-src 'none'; style-src 'nonce-[\w-]{22}'; script-src 'nonce-[\w-]{22}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'$/u;
+const CALLBACK_NONCE_PATTERN = /style-src 'nonce-([\w-]{22})'/u;
 
 function callbackTarget(port: number, query = ""): string {
   return `http://127.0.0.1:${port}/auth/callback${query}`;
@@ -50,6 +53,55 @@ function request(url: string, method = "GET", host?: string): Promise<number> {
     call.once("error", reject);
     call.end();
   });
+}
+
+interface CapturedPage {
+  status: number;
+  headers: IncomingHttpHeaders;
+  body: string;
+}
+
+function requestPage(url: string): Promise<CapturedPage> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const call = httpRequest(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method: "GET",
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.once("end", () =>
+          resolve({
+            status: response.statusCode ?? 0,
+            headers: response.headers,
+            body: Buffer.concat(chunks).toString("utf8"),
+          }),
+        );
+      },
+    );
+    call.once("error", reject);
+    call.end();
+  });
+}
+
+async function captureCallbackPage(query: string): Promise<CapturedPage> {
+  const listener = await createDesktopLoginCallbackListener({
+    attemptId,
+    state,
+    port: 0,
+    timeoutMs: 2_000,
+  });
+  try {
+    const page = requestPage(callbackTarget(listener.port, query));
+    await listener.waitForCallback().catch(() => undefined);
+    return await page;
+  } finally {
+    await listener.close();
+  }
 }
 
 function hostIdentity(): HostIdentity {
@@ -356,6 +408,48 @@ describe("desktop login loopback", () => {
     } finally {
       await listener.close();
     }
+  });
+
+  it("serves a nonce-bound completion page that loads no subresource", async () => {
+    const page = await captureCallbackPage(`?code=${code}&state=${state}`);
+
+    expect(page.status).toBe(200);
+    const csp = String(page.headers["content-security-policy"]);
+    expect(csp).toMatch(CALLBACK_CSP_PATTERN);
+    const nonce = CALLBACK_NONCE_PATTERN.exec(csp)?.[1];
+    expect(nonce).toBeDefined();
+    expect(page.body).toContain(`<style nonce="${nonce}">`);
+    expect(page.body).toContain(`<script nonce="${nonce}">`);
+    expect(page.body).toContain("Return to CODRA");
+    expect(page.body).not.toMatch(/<link|\ssrc=|\shref=|@import/u);
+    expect(page.body).not.toContain(code);
+    expect(page.body).not.toContain(state);
+    expect(page.body).not.toContain(attemptId);
+    expect(page.headers["cache-control"]).toBe("no-store");
+    expect(page.headers["content-type"]).toBe("text/html; charset=utf-8");
+    expect(page.headers["referrer-policy"]).toBe("no-referrer");
+    expect(page.headers["x-content-type-options"]).toBe("nosniff");
+  });
+
+  it("protects the cancellation page identically with a per-response nonce", async () => {
+    const cancelled = await captureCallbackPage(
+      "?error=access_denied&state=opaque-google-state",
+    );
+    const completed = await captureCallbackPage(`?code=${code}&state=${state}`);
+
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body).toContain("Sign-in was cancelled.");
+    expect(cancelled.body).toContain("Return to CODRA");
+    expect(String(cancelled.headers["content-security-policy"])).toMatch(
+      CALLBACK_CSP_PATTERN,
+    );
+    expect(cancelled.headers["cache-control"]).toBe("no-store");
+    expect(cancelled.headers["content-type"]).toBe("text/html; charset=utf-8");
+    expect(cancelled.headers["referrer-policy"]).toBe("no-referrer");
+    expect(cancelled.headers["x-content-type-options"]).toBe("nosniff");
+    expect(cancelled.headers["content-security-policy"]).not.toBe(
+      completed.headers["content-security-policy"],
+    );
   });
 
   it("uses the registered production loopback port by default", async () => {
