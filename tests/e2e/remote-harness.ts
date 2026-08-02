@@ -1,14 +1,18 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { _electron as electron } from "playwright";
 import type { ElectronApplication, Page } from "playwright";
 import {
   rememberDescendants,
   terminateCapturedProcessTree,
 } from "./process-cleanup";
+
+const execFileAsync = promisify(execFile);
 
 // Mirrors packages/protocol/src/deployment.ts:133-146 (emulatorDeployment).
 // tests/ is not a pnpm workspace member, so @codra/protocol is not resolvable
@@ -21,6 +25,19 @@ const EMULATOR_FUNCTIONS_ORIGIN = "http://127.0.0.1:5001";
 const EMULATOR_API_KEY = "demo-codra-api-key";
 const EMULATOR_READY_TIMEOUT_MS = 300_000;
 const DEVICE_LIVENESS_SETTLE_MS = 1_000;
+
+// The three ports firebase.json binds the emulators to (127.0.0.1:9099,
+// :8080, :5001). These are baked into the compiled remote-test build (see
+// firebase-emulator.ts in both apps/desktop and apps/web), so they cannot
+// be reassigned per run.
+const REQUIRED_EMULATOR_PORTS: ReadonlyArray<{
+  port: number;
+  label: string;
+}> = [
+  { port: 9099, label: "auth" },
+  { port: 8080, label: "firestore" },
+  { port: 5001, label: "functions" },
+];
 
 const firebaseBin = path.resolve("node_modules/.bin/firebase");
 const remoteTestMainEntry = path.resolve(
@@ -84,9 +101,94 @@ function buildDeviceEnv(
   return { ...env, ...overrides };
 }
 
+const PORT_PROBE_TIMEOUT_MS = 500;
+
+// A bind-based probe (net.createServer().listen()) is not reliable here:
+// on macOS, Docker Desktop forwards published container ports through a
+// userspace proxy that does not conflict with a plain loopback `listen()`
+// — measured directly on this machine against a container publishing
+// 0.0.0.0:8080, which a bind probe reported as free even though the
+// Firestore emulator then failed with "Port 8080 is not open". A
+// connect-based probe does not have this blind spot: if anything answers
+// the TCP handshake, the port is unusable for the emulator, regardless of
+// how the holder itself was set up.
+function isPortFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ port, host: "127.0.0.1" });
+    let settled = false;
+    const settle = (free: boolean): void => {
+      if (settled) return;
+      settled = true;
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(free);
+    };
+    // Something answered the handshake: the port is occupied.
+    socket.once("connect", () => settle(false));
+    // Connection refused (or any other error) means nothing is listening,
+    // or the result is inconclusive — either way, do not block the
+    // harness on a probe failure the emulator itself would surface more
+    // clearly if it turned out to matter.
+    socket.once("error", () => settle(true));
+    socket.setTimeout(PORT_PROBE_TIMEOUT_MS, () => settle(true));
+  });
+}
+
+// Best-effort only: identifies what already holds a port so the failure
+// message can point at it, but detection must never depend on this
+// succeeding (no `lsof` on the PATH, unsupported platform, etc. all just
+// fall back to an undefined holder description).
+async function describePortHolder(port: number): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("lsof", [
+      `-iTCP:${port}`,
+      "-sTCP:LISTEN",
+      "-P",
+      "-n",
+    ]);
+    const lines = stdout.trim().split("\n").filter(Boolean);
+    // First line is the `lsof` column header; keep only process rows.
+    const holders = lines.slice(1);
+    return holders.length > 0 ? holders.join("\n") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Detect-and-report only: this never stops, kills, or signals whatever
+// holds a required port. A conflict here means the machine running the
+// harness has something else bound to a port the Firebase emulators need
+// (firebase.json's `emulators.{auth,firestore,functions}.port`, baked into
+// the compiled remote-test build) — that is the local environment's
+// problem to fix, not a defect in the harness or in CODRA, so this fails
+// fast and by name rather than surfacing as an opaque emulator-startup
+// error after minutes of build work.
+async function assertEmulatorPortsFree(): Promise<void> {
+  const conflicts: string[] = [];
+  for (const { port, label } of REQUIRED_EMULATOR_PORTS) {
+    if (await isPortFree(port)) continue;
+    const holder = await describePortHolder(port);
+    conflicts.push(
+      `  port ${port} (${label} emulator)` +
+        (holder ? `, currently held by:\n${holder}` : ", holder unknown"),
+    );
+  }
+  if (conflicts.length === 0) return;
+  throw new Error(
+    "The remote-test harness needs ports 9099, 8080, and 5001 free " +
+      "for the Firebase emulators (firebase.json, baked into the " +
+      "compiled remote-test build) but found:\n" +
+      conflicts.join("\n") +
+      "\nThis is a conflict in the local environment, not a CODRA bug " +
+      "— free the port(s) above and re-run. Nothing was stopped or " +
+      "signalled automatically.",
+  );
+}
+
 export async function startRemoteEmulators(): Promise<
   RemoteEmulators & { stop(): Promise<void> }
 > {
+  await assertEmulatorPortsFree();
   await runCommand("pnpm", ["--filter", "@codra/protocol", "build"]);
   await runCommand("pnpm", ["--filter", "@codra/functions", "build"]);
   await runCommand("pnpm", ["run", "stage:functions-deploy"]);

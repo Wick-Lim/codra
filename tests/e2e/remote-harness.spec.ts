@@ -27,7 +27,16 @@ test("the harness runs two isolated remote-test devices against the emulators", 
     expect(new Set(pids).size).toBe(2);
     for (const pid of pids) expect(processExists(pid)).toBe(true);
     expect(devices[0].userDataDir).not.toBe(devices[1].userDataDir);
-    expect(devices[0].descendantPids).not.toBe(devices[1].descendantPids);
+    // `.not.toBe()` on two Sets is reference identity, which two distinct
+    // Set instances always satisfy (even two empty ones) and proves
+    // nothing. Assert the sets are actually disjoint instead — this is
+    // emptiness-tolerant (holds trivially if either side is empty) but
+    // fails for real if a descendant PID were ever captured under both
+    // devices.
+    const descendantOverlap = [...devices[0].descendantPids].filter((pid) =>
+      devices[1].descendantPids.has(pid),
+    );
+    expect(descendantOverlap).toEqual([]);
     for (const device of devices) {
       await expect(
         device.page.getByRole("button", { name: "New terminal" }),
