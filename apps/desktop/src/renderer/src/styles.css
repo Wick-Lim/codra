@@ -939,8 +939,13 @@ button:focus-visible,
   width: min(780px, calc(100vw - 48px));
 }
 
+.new-agent-dialog .modal-header {
+  padding: 16px 20px 14px;
+}
+
 .new-agent-dialog .modal-body {
   max-height: calc(100vh - 168px);
+  padding-block: 16px 18px;
   overflow: auto;
 }
 
@@ -952,7 +957,7 @@ button:focus-visible,
 .agent-catalog-layout {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
-  min-height: 440px;
+  min-height: 420px;
   overflow: hidden;
   background: var(--obsidian);
   border: 1px solid var(--steel-soft);
@@ -1342,7 +1347,7 @@ button:focus-visible,
 
 .agent-prompt-field textarea {
   width: 100%;
-  min-height: 158px;
+  min-height: 142px;
   padding: 13px 14px;
   resize: vertical;
   color: var(--fog);
@@ -1379,7 +1384,7 @@ button:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 12px 13px;
+  padding: 9px 11px;
   background: var(--deck);
   border: 1px solid var(--steel-soft);
   border-radius: 6px;

@@ -59,11 +59,9 @@ function nodeCommand(
 }
 
 function childEnvironment(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const {
-    CODRA_AGENT_SETUP_RUNNER: _setupRunner,
-    ELECTRON_RUN_AS_NODE: _electronNodeMode,
-    ...baseEnvironment
-  } = process.env;
+  const baseEnvironment = { ...process.env };
+  delete baseEnvironment.CODRA_AGENT_SETUP_RUNNER;
+  delete baseEnvironment.ELECTRON_RUN_AS_NODE;
   return { ...baseEnvironment, ...overrides };
 }
 
