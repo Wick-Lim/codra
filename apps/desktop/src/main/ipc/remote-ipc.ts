@@ -3,7 +3,10 @@ import {
   AgentRuntimeSchema,
   AgentTargetConnectRequestSchema,
   AgentTargetRuntimeRequestSchema,
+  ApproveRemoteSessionRequestSchema,
   IPC_CHANNELS,
+  PendingRemoteSessionListSchema,
+  RejectRemoteSessionRequestSchema,
   RemoteAccountStatusSchema,
   RemoteAuthProviderSchema,
   RemoteHostStatusSchema,
@@ -16,6 +19,9 @@ import {
   type AgentExecutionTarget,
   type AgentLaunchTarget,
   type AgentRuntime,
+  type ApproveRemoteSessionRequest,
+  type PendingRemoteSession,
+  type RejectRemoteSessionRequest,
   type RemoteAccountStatus,
   type RemoteAuthProvider,
   type RemoteHostStatus,
@@ -64,6 +70,12 @@ export interface RemoteHostControllerPort {
   onTargetsChanged(
     listener: (targets: AgentLaunchTarget[]) => void,
   ): () => void;
+  getPendingSessions(): PendingRemoteSession[];
+  approveSession(request: ApproveRemoteSessionRequest): Promise<void>;
+  rejectSession(request: RejectRemoteSessionRequest): Promise<void>;
+  onPendingSessionsChanged(
+    listener: (sessions: PendingRemoteSession[]) => void,
+  ): () => void;
 }
 
 export interface RegisterRemoteIpcOptions {
@@ -76,13 +88,13 @@ export interface RegisterRemoteIpcOptions {
 
 type RemoteIpcWindowLike = BrowserWindowLike & DesktopAuthParentWindowLike;
 
-function sendToLiveWindows(
+function sendToTrustedWindows(
   windows: () => readonly BrowserWindowLike[],
   isTrustedRendererUrl: (url: string) => boolean,
-  status: RemoteHostStatus,
+  channel: string,
+  payload: unknown,
   reportError: (error: unknown) => void,
 ): void {
-  const payload = RemoteHostStatusSchema.parse(status);
   for (const window of windows()) {
     try {
       if (window.isDestroyed?.()) continue;
@@ -94,57 +106,7 @@ function sendToLiveWindows(
       ) {
         continue;
       }
-      webContents.send(IPC_CHANNELS.remoteState, payload);
-    } catch (error) {
-      reportError(error);
-    }
-  }
-}
-
-function sendAccountStatusToLiveWindows(
-  windows: () => readonly BrowserWindowLike[],
-  isTrustedRendererUrl: (url: string) => boolean,
-  status: RemoteAccountStatus,
-  reportError: (error: unknown) => void,
-): void {
-  const payload = RemoteAccountStatusSchema.parse(status);
-  for (const window of windows()) {
-    try {
-      if (window.isDestroyed?.()) continue;
-      const webContents = window.webContents;
-      if (!webContents || webContents.isDestroyed()) continue;
-      if (
-        !isTrustedRendererUrl(webContents.getURL()) ||
-        !isTrustedRendererUrl(webContents.mainFrame.url)
-      ) {
-        continue;
-      }
-      webContents.send(IPC_CHANNELS.remoteAuthState, payload);
-    } catch (error) {
-      reportError(error);
-    }
-  }
-}
-
-function sendTargetsToLiveWindows(
-  windows: () => readonly BrowserWindowLike[],
-  isTrustedRendererUrl: (url: string) => boolean,
-  targets: AgentLaunchTarget[],
-  reportError: (error: unknown) => void,
-): void {
-  const payload = AgentLaunchTargetSchema.array().parse(targets);
-  for (const window of windows()) {
-    try {
-      if (window.isDestroyed?.()) continue;
-      const webContents = window.webContents;
-      if (!webContents || webContents.isDestroyed()) continue;
-      if (
-        !isTrustedRendererUrl(webContents.getURL()) ||
-        !isTrustedRendererUrl(webContents.mainFrame.url)
-      ) {
-        continue;
-      }
-      webContents.send(IPC_CHANNELS.agentTargetsChanged, payload);
+      webContents.send(channel, payload);
     } catch (error) {
       reportError(error);
     }
@@ -270,6 +232,33 @@ export function registerRemoteIpc({
         return RemoteHostStatusSchema.parse(await controller.deactivate());
       },
     ],
+    [
+      IPC_CHANNELS.remoteGetPendingSessions,
+      (event) => {
+        authorize(event);
+        return PendingRemoteSessionListSchema.parse(
+          controller.getPendingSessions(),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.remoteApproveSession,
+      async (event, rawRequest) => {
+        authorize(event);
+        await controller.approveSession(
+          ApproveRemoteSessionRequestSchema.parse(rawRequest),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.remoteRejectSession,
+      async (event, rawRequest) => {
+        authorize(event);
+        await controller.rejectSession(
+          RejectRemoteSessionRequestSchema.parse(rawRequest),
+        );
+      },
+    ],
   ];
   const registeredChannels: string[] = [];
   let unsubscribe: (() => void) | undefined;
@@ -279,29 +268,48 @@ export function registerRemoteIpc({
       registeredChannels.push(channel);
     }
     unsubscribe = controller.onStatusChanged((status) =>
-      sendToLiveWindows(windows, isTrustedRendererUrl, status, reportError),
-    );
-    const unsubscribeAccount = controller.onAccountStatusChanged((status) =>
-      sendAccountStatusToLiveWindows(
+      sendToTrustedWindows(
         windows,
         isTrustedRendererUrl,
-        status,
+        IPC_CHANNELS.remoteState,
+        RemoteHostStatusSchema.parse(status),
+        reportError,
+      ),
+    );
+    const unsubscribeAccount = controller.onAccountStatusChanged((status) =>
+      sendToTrustedWindows(
+        windows,
+        isTrustedRendererUrl,
+        IPC_CHANNELS.remoteAuthState,
+        RemoteAccountStatusSchema.parse(status),
         reportError,
       ),
     );
     const previousUnsubscribe = unsubscribe;
     const unsubscribeTargets = controller.onTargetsChanged((targets) =>
-      sendTargetsToLiveWindows(
+      sendToTrustedWindows(
         windows,
         isTrustedRendererUrl,
-        targets,
+        IPC_CHANNELS.agentTargetsChanged,
+        AgentLaunchTargetSchema.array().parse(targets),
         reportError,
       ),
+    );
+    const unsubscribePendingSessions = controller.onPendingSessionsChanged(
+      (sessions) =>
+        sendToTrustedWindows(
+          windows,
+          isTrustedRendererUrl,
+          IPC_CHANNELS.remotePendingSessions,
+          PendingRemoteSessionListSchema.parse(sessions),
+          reportError,
+        ),
     );
     unsubscribe = () => {
       previousUnsubscribe?.();
       unsubscribeAccount();
       unsubscribeTargets();
+      unsubscribePendingSessions();
     };
   } catch (error) {
     for (const channel of registeredChannels) ipc.removeHandler(channel);

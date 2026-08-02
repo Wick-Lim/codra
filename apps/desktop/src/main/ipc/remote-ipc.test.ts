@@ -3,6 +3,9 @@ import {
   IPC_CHANNELS,
   type AgentExecutionTarget,
   type AgentLaunchTarget,
+  type ApproveRemoteSessionRequest,
+  type PendingRemoteSession,
+  type RejectRemoteSessionRequest,
   type RemoteAccountStatus,
   type RemoteHostStatus,
 } from "@codra/protocol";
@@ -51,6 +54,16 @@ function controller() {
   let listener: ((next: RemoteHostStatus) => void) | undefined;
   let accountListener: ((next: RemoteAccountStatus) => void) | undefined;
   let targetsListener: ((next: AgentLaunchTarget[]) => void) | undefined;
+  let pendingListener: ((next: PendingRemoteSession[]) => void) | undefined;
+  let pending: PendingRemoteSession[] = [
+    {
+      sessionId: "7f1d3b2a-0c4e-4a9b-9d1e-5c6f7a8b9c0d",
+      clientDeviceId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      requesterDisplayName: "Laptop Mac",
+      requestedScopes: ["workspace.read", "agent.launch"],
+      expiresAt: 1_700_000_000_000,
+    },
+  ];
   const localTarget: AgentLaunchTarget = {
     target: { kind: "local" },
     state: "connected",
@@ -125,12 +138,37 @@ function controller() {
         targetsListener = undefined;
       };
     },
+    getPendingSessions: vi.fn(() => pending),
+    approveSession: vi.fn(async (request: ApproveRemoteSessionRequest) => {
+      pending = pending.filter(
+        (session) => session.sessionId !== request.sessionId,
+      );
+      pendingListener?.(pending);
+    }),
+    rejectSession: vi.fn(async (request: RejectRemoteSessionRequest) => {
+      pending = pending.filter(
+        (session) => session.sessionId !== request.sessionId,
+      );
+      pendingListener?.(pending);
+    }),
+    onPendingSessionsChanged: (
+      next: (value: PendingRemoteSession[]) => void,
+    ) => {
+      pendingListener = next;
+      return () => {
+        pendingListener = undefined;
+      };
+    },
     emit(next: RemoteHostStatus) {
       status = next;
       listener?.(next);
     },
     emitTargets(next: AgentLaunchTarget[]) {
       targetsListener?.(next);
+    },
+    emitPending(next: PendingRemoteSession[]) {
+      pending = next;
+      pendingListener?.(next);
     },
   };
 }
@@ -276,5 +314,124 @@ describe("registerRemoteIpc", () => {
       ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event, "google"),
     ).rejects.toThrow("Unauthorized terminal IPC sender");
     expect(host.login).not.toHaveBeenCalled();
+  });
+
+  it("pulls, pushes, and resolves pending remote sessions", async () => {
+    const ipc = new FakeIpc();
+    const host = controller();
+    const client = sender();
+    const cleanup = registerRemoteIpc({
+      ipc,
+      controller: host,
+      windows: () => [client.window],
+      isTrustedRendererUrl: (url) => url.startsWith("file:///trusted/"),
+    });
+    const sessionId = "7f1d3b2a-0c4e-4a9b-9d1e-5c6f7a8b9c0d";
+
+    expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteGetPendingSessions)?.(client.event),
+    ).toEqual([
+      {
+        sessionId,
+        clientDeviceId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        requesterDisplayName: "Laptop Mac",
+        requestedScopes: ["workspace.read", "agent.launch"],
+        expiresAt: 1_700_000_000_000,
+      },
+    ]);
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteApproveSession)?.(client.event, {
+        sessionId,
+        approvedScopes: ["workspace.read"],
+      }),
+    ).resolves.toBeUndefined();
+    expect(host.approveSession).toHaveBeenCalledWith({
+      sessionId,
+      approvedScopes: ["workspace.read"],
+    });
+    expect(client.sends.at(-1)).toEqual({
+      channel: IPC_CHANNELS.remotePendingSessions,
+      payload: [],
+    });
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteApproveSession)?.(client.event, {
+        sessionId,
+        approvedScopes: [],
+      }),
+    ).rejects.toThrow();
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteRejectSession)?.(client.event, {
+        sessionId,
+        reason: "USER_REJECTED",
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteRejectSession)?.(client.event, {
+        sessionId,
+      }),
+    ).resolves.toBeUndefined();
+    expect(host.rejectSession).toHaveBeenCalledWith({ sessionId });
+
+    cleanup();
+    const before = client.sends.length;
+    host.emitPending([]);
+    expect(client.sends).toHaveLength(before);
+  });
+
+  it("rejects an untrusted renderer on every pending-session channel", async () => {
+    const ipc = new FakeIpc();
+    const host = controller();
+    const client = sender();
+    registerRemoteIpc({
+      ipc,
+      controller: host,
+      windows: () => [client.window],
+      isTrustedRendererUrl: () => false,
+    });
+    const sessionId = "7f1d3b2a-0c4e-4a9b-9d1e-5c6f7a8b9c0d";
+
+    expect(() =>
+      ipc.handlers.get(IPC_CHANNELS.remoteGetPendingSessions)?.(client.event),
+    ).toThrow("Unauthorized terminal IPC sender");
+    expect(host.getPendingSessions).not.toHaveBeenCalled();
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteApproveSession)?.(client.event, {
+        sessionId,
+        approvedScopes: ["workspace.read"],
+      }),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+    expect(host.approveSession).not.toHaveBeenCalled();
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteRejectSession)?.(client.event, {
+        sessionId,
+      }),
+    ).rejects.toThrow("Unauthorized terminal IPC sender");
+    expect(host.rejectSession).not.toHaveBeenCalled();
+  });
+
+  it("withholds a pending-session push from a window whose frame navigated away", () => {
+    const ipc = new FakeIpc();
+    const host = controller();
+    const client = sender();
+    registerRemoteIpc({
+      ipc,
+      controller: host,
+      windows: () => [client.window],
+      isTrustedRendererUrl: (url) => url.startsWith("file:///trusted/"),
+    });
+
+    // webContents.getURL() still reports the trusted origin, but the live
+    // main frame has since navigated elsewhere — only the mainFrame.url
+    // check catches this.
+    client.window.webContents.mainFrame.url = "https://attacker.example/";
+
+    host.emitPending([]);
+
+    expect(client.sends).toHaveLength(0);
   });
 });
