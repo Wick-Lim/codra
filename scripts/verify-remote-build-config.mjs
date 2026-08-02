@@ -29,6 +29,7 @@ const [
   firebaseJsonText,
   webVite,
   webRemoteVite,
+  playwrightConfigText,
 ] = await Promise.all([
   read("pnpm-workspace.yaml"),
   read("package.json"),
@@ -40,6 +41,7 @@ const [
   read("firebase.json"),
   read("apps/web/vite.config.ts"),
   read("apps/web/vite.remote-test.config.ts"),
+  read("playwright.config.ts"),
 ]);
 
 const rootPackage = JSON.parse(rootPackageText);
@@ -158,6 +160,30 @@ for (const script of [
     `missing ${script} script`,
   );
 }
+
+for (const project of [
+  "remote-harness",
+  "remote-direct",
+  "remote-reconnect",
+  "remote-agent-workspace",
+]) {
+  requireText(playwrightConfigText, `name: "${project}"`, "Playwright config");
+  requireText(
+    playwrightConfigText,
+    `testMatch: "${project}.spec.ts"`,
+    "Playwright config",
+  );
+  assert.equal(
+    rootPackage.scripts[`test:${project}`],
+    `playwright test --project=${project}`,
+    `test:${project} must select the ${project} project`,
+  );
+}
+assert.equal(
+  (playwrightConfigText.match(/^ {6}timeout: /gmu) ?? []).length,
+  4,
+  "each remote Playwright project must set its own timeout",
+);
 
 for (const file of [
   "apps/desktop/src/main/remote/safe-storage-electron.ts",

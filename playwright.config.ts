@@ -23,5 +23,25 @@ export default defineConfig({
       name: "packaged-native-modules",
       testMatch: "packaged-native-modules.spec.ts",
     },
+    {
+      name: "remote-harness",
+      testMatch: "remote-harness.spec.ts",
+      timeout: 600_000,
+    },
+    {
+      name: "remote-direct",
+      testMatch: "remote-direct.spec.ts",
+      timeout: 300_000,
+    },
+    {
+      name: "remote-reconnect",
+      testMatch: "remote-reconnect.spec.ts",
+      timeout: 300_000,
+    },
+    {
+      name: "remote-agent-workspace",
+      testMatch: "remote-agent-workspace.spec.ts",
+      timeout: 300_000,
+    },
   ],
 });
