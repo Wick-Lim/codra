@@ -30,12 +30,21 @@ const configSchema = z
   .strict();
 const cloudflareResponseSchema = z
   .object({
-    ice_servers: z.array(TurnIceServerSchema).min(1).max(8),
+    iceServers: z.array(TurnIceServerSchema).min(1).max(8),
   })
   .strict();
 
 export type CloudflareTurnConfig = z.infer<typeof configSchema>;
 export type CloudflareTurnIceServer = z.infer<typeof TurnIceServerSchema>;
+// Cloudflare's generate-ice-servers response mixes a credential-less STUN
+// entry in with the TURN relay entry (see requestCloudflareTurnCredentials
+// below). Once that STUN entry is filtered out, every remaining entry is
+// guaranteed to carry both fields — this type says so at the boundary that
+// owns the filtering, rather than leaving it implicit.
+export type CloudflareRelayIceServer = CloudflareTurnIceServer & {
+  username: string;
+  credential: string;
+};
 
 function millis(value: Timestamp | number): number {
   return value instanceof Timestamp ? value.toMillis() : value;
@@ -48,7 +57,7 @@ function ambiguousTurnError(): HttpsError {
 export async function requestCloudflareTurnCredentials(
   config: CloudflareTurnConfig,
   fetchImpl: typeof fetch = fetch,
-): Promise<CloudflareTurnIceServer[]> {
+): Promise<CloudflareRelayIceServer[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TURN_REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -72,7 +81,22 @@ export async function requestCloudflareTurnCredentials(
   }
   if (response.status !== 201) throw new Error("TURN_GENERATION_AMBIGUOUS");
   try {
-    return cloudflareResponseSchema.parse(await response.json()).ice_servers;
+    const parsed = cloudflareResponseSchema.parse(await response.json());
+    // The STUN-only entry has no username/credential and uses `stun:` URLs;
+    // CODRA's only ICE consumer is the desktop native peer, which forces
+    // relay-only UDP TURN (normalizeHostIceServers in
+    // packages/webrtc/src/ice.ts) and never gathers STUN/host candidates, so
+    // that entry is both useless to the client and rejected outright by
+    // ice.ts's normalizeInput (which requires username/credential on every
+    // entry it is given). Filter it out here, at the boundary that owns the
+    // raw Cloudflare shape, instead of teaching the client to tolerate a
+    // server type it will never use.
+    const relayServers = parsed.iceServers.filter(
+      (entry): entry is CloudflareRelayIceServer =>
+        Boolean(entry.username) && Boolean(entry.credential),
+    );
+    if (relayServers.length === 0) throw new Error("TURN_GENERATION_AMBIGUOUS");
+    return relayServers;
   } catch {
     throw new Error("TURN_GENERATION_AMBIGUOUS");
   }
@@ -111,7 +135,7 @@ export const issueTurnCredentials = onCall(
       throw new HttpsError("failed-precondition", "TURN_CONFIG_UNAVAILABLE");
     }
 
-    let iceServers: CloudflareTurnIceServer[];
+    let iceServers: CloudflareRelayIceServer[];
     try {
       iceServers = await requestCloudflareTurnCredentials(config);
     } catch {

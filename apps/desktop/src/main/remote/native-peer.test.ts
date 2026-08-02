@@ -110,6 +110,53 @@ describe("native peer adapter", () => {
     expect(channel.bufferedAmount).toBe(12);
   });
 
+  it("negotiates the live Cloudflare TURN shape down to the single UDP relay it can use", () => {
+    // This is the exact credentialed entry a live call to Cloudflare's
+    // generate-ice-servers endpoint returns (values synthetic): six url
+    // variants, one of which (`:53`) this client does not support. The
+    // full pipeline — DesktopPeerConnector's iceInputs mapping, then
+    // normalizeBrowserIceServers/normalizeHostIceServers — must still land
+    // on exactly the one usable UDP relay entry, not throw.
+    let configuration: Record<string, unknown> | undefined;
+    const nativePeer = createNativePeerFake();
+    const module = {
+      PeerConnection: class {
+        constructor(_name: string, value: Record<string, unknown>) {
+          configuration = value;
+          return nativePeer;
+        }
+      },
+    } as unknown as NativeDataChannelModule;
+
+    createNativePeerConnection(module, "session-1", [
+      {
+        urls: [
+          "turn:turn.cloudflare.com:3478?transport=udp",
+          "turn:turn.cloudflare.com:3478?transport=tcp",
+          "turns:turn.cloudflare.com:5349?transport=tcp",
+          "turn:turn.cloudflare.com:53?transport=udp",
+          "turn:turn.cloudflare.com:80?transport=tcp",
+          "turns:turn.cloudflare.com:443?transport=tcp",
+        ],
+        username: "synthetic-short-lived-user",
+        credential: "synthetic-short-lived-password",
+      },
+    ]);
+
+    expect(configuration).toMatchObject({
+      iceTransportPolicy: "relay",
+      iceServers: [
+        {
+          hostname: "turn.cloudflare.com",
+          port: 3478,
+          username: "synthetic-short-lived-user",
+          password: "synthetic-short-lived-password",
+          relayType: "TurnUdp",
+        },
+      ],
+    });
+  });
+
   it("rejects TURN sets without UDP relay", () => {
     const module = {
       PeerConnection: vi.fn(),

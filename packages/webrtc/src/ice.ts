@@ -70,15 +70,34 @@ export function normalizeBrowserIceServers(
     throw new Error("TURN_SERVER_LIST_BOUNDED");
   const normalized = inputs.flatMap((input) => {
     const urls = normalizeInput(input);
-    return urls.map((value) => {
-      const parsed = parseTurnUrl(value);
-      return {
-        urls: value,
-        username: input.username as string,
-        credential: input.credential as string,
-        transport: parsed.transport,
-      };
-    });
+    // Cloudflare's TURN key API advertises a fixed bouquet of URL variants
+    // per credential set (udp/tcp on 3478, tls on 5349, and firewall-bypass
+    // fallbacks including a `:53` variant this client does not support). A
+    // single unsupported variant must not discard the whole credential set
+    // — only fail it once every url in it is unusable, and surface the
+    // error from that last attempt so a genuinely bad single-url input
+    // still fails with its specific reason.
+    const entries: BrowserIceServer[] = [];
+    let lastError: unknown;
+    for (const value of urls) {
+      try {
+        const parsed = parseTurnUrl(value);
+        entries.push({
+          urls: value,
+          username: input.username as string,
+          credential: input.credential as string,
+          transport: parsed.transport,
+        });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (entries.length === 0) {
+      throw lastError instanceof Error
+        ? lastError
+        : new Error("TURN_URL_INVALID");
+    }
+    return entries;
   });
   if (normalized.length > maxIceServers)
     throw new Error("TURN_SERVER_LIST_BOUNDED");
