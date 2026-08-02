@@ -135,6 +135,13 @@ describe("desktop remote IPC contract", () => {
       }),
     ).toThrow();
     expect(() =>
+      ApproveRemoteSessionRequestSchema.parse({
+        sessionId: pending.sessionId,
+        approvedScopes: ["workspace.read"],
+        approverUid: "leak",
+      }),
+    ).toThrow();
+    expect(() =>
       RejectRemoteSessionRequestSchema.parse({
         sessionId: pending.sessionId,
         rejectionReason: "USER_REJECTED",
