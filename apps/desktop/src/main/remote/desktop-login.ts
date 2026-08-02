@@ -47,6 +47,17 @@ export interface DesktopLoginBootstrapOptions {
   action: DesktopLoginAction;
 }
 
+export function shouldRetryDesktopLoginAsRegister(
+  action: DesktopLoginAction,
+  error: unknown,
+): boolean {
+  return (
+    action === "resume" &&
+    error instanceof Error &&
+    error.message === "DEVICE_NOT_FOUND"
+  );
+}
+
 export interface DesktopLoginCallback {
   attemptId: string;
   code: string;

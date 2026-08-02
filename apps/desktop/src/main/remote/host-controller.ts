@@ -17,6 +17,7 @@ import { loadOrCreateHostIdentity, type HostIdentity } from "./host-identity";
 import { bootstrapRemoteAccount } from "@codra/remote-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/remote-firebase-config";
 import { remoteErrorStatus } from "./remote-state";
+import { shouldRetryDesktopLoginAsRegister } from "./desktop-login";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -101,7 +102,19 @@ export class RemoteHostController {
         this.options.userDataPath,
       );
       const action = identity.created ? "register" : "resume";
-      const login = await bootstrapRemoteAccount(runtime, { identity, action });
+      let login;
+      try {
+        login = await bootstrapRemoteAccount(runtime, { identity, action });
+      } catch (error) {
+        // A previous OAuth attempt can persist the local key before its
+        // server-side device is created. Recover that interrupted first run
+        // by registering the same key instead of requiring manual cleanup.
+        if (!shouldRetryDesktopLoginAsRegister(action, error)) throw error;
+        login = await bootstrapRemoteAccount(runtime, {
+          identity,
+          action: "register",
+        });
+      }
       let device;
       if (login) {
         await signInWithCustomToken(runtime.auth, login.token);

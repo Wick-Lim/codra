@@ -19,6 +19,7 @@ import {
   DESKTOP_LOGIN_CALLBACK_PORT,
   desktopLoginFunctionUrl,
   parseDesktopLoginCallback,
+  shouldRetryDesktopLoginAsRegister,
 } from "./desktop-login";
 import type { HostIdentity } from "./host-identity";
 
@@ -154,6 +155,21 @@ describe("desktop login loopback", () => {
     expect(
       desktopLoginResponseErrorCode({ error: "private token abc" }),
     ).toBeUndefined();
+  });
+
+  it("recovers a persisted identity when its server device is missing", () => {
+    expect(
+      shouldRetryDesktopLoginAsRegister("resume", new Error("DEVICE_NOT_FOUND")),
+    ).toBe(true);
+    expect(
+      shouldRetryDesktopLoginAsRegister("resume", new Error("DEVICE_DISABLED")),
+    ).toBe(false);
+    expect(
+      shouldRetryDesktopLoginAsRegister(
+        "register",
+        new Error("DEVICE_NOT_FOUND"),
+      ),
+    ).toBe(false);
   });
 
   it("exchanges the Google callback as the Identity Toolkit POST body", () => {
