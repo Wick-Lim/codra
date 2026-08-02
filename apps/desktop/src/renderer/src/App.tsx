@@ -5,6 +5,7 @@ import type {
   AgentLaunchTarget,
   AgentRuntime,
   AgentSetupRequest,
+  PendingRemoteSession,
   RemoteAccountStatus,
   RemoteAuthProvider,
   RemoteHostStatus,
@@ -15,6 +16,7 @@ import { useTerminals } from "./terminal/useTerminals";
 import { SignInDialog } from "./account/SignInDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { NewAgentDialog } from "./agent/NewAgentDialog";
+import { SessionApprovalDialog } from "./remote/SessionApprovalDialog";
 
 export default function App() {
   const {
@@ -35,6 +37,11 @@ export default function App() {
   const [accountStatus, setAccountStatus] = React.useState<RemoteAccountStatus>(
     { state: "signed_out" },
   );
+  const [pendingSessions, setPendingSessions] = React.useState<
+    PendingRemoteSession[]
+  >([]);
+  const [approvalBusy, setApprovalBusy] = React.useState(false);
+  const [approvalError, setApprovalError] = React.useState<string>();
   const [signInOpen, setSignInOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [settingsSection, setSettingsSection] = React.useState<
@@ -95,6 +102,13 @@ export default function App() {
       window.codra.remote.onAuthStateChanged(setAccountStatus);
     const stopListeningTargets =
       window.codra.agents.onTargetsChanged(setAgentTargets);
+    let pendingPushReceived = false;
+    const stopListeningPending = window.codra.remote.onPendingSessionsChanged(
+      (sessions) => {
+        pendingPushReceived = true;
+        setPendingSessions(sessions);
+      },
+    );
     void window.codra.remote
       .getState()
       .then(setRemoteStatus)
@@ -114,10 +128,19 @@ export default function App() {
           message: "REMOTE_AUTH_UNAVAILABLE",
         }),
       );
+    void window.codra.remote
+      .getPendingSessions()
+      .then((sessions) => {
+        if (!pendingPushReceived) setPendingSessions(sessions);
+      })
+      .catch(() => {
+        if (!pendingPushReceived) setPendingSessions([]);
+      });
     return () => {
       stopListening();
       stopListeningAccount();
       stopListeningTargets();
+      stopListeningPending();
     };
   }, [refreshAgentRuntimes, refreshAgentTargets]);
 
@@ -301,6 +324,41 @@ export default function App() {
     else void deactivateRemote();
   }
 
+  async function approveSession(
+    sessionId: string,
+    approvedScopes: string[],
+  ): Promise<void> {
+    setApprovalBusy(true);
+    setApprovalError(undefined);
+    try {
+      await window.codra.remote.approveSession({ sessionId, approvedScopes });
+      setPendingSessions((current) =>
+        current.filter((session) => session.sessionId !== sessionId),
+      );
+    } catch {
+      setApprovalError("The remote connection could not be approved.");
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
+
+  async function denySession(sessionId: string): Promise<void> {
+    setApprovalBusy(true);
+    setApprovalError(undefined);
+    try {
+      await window.codra.remote.rejectSession({ sessionId });
+      setPendingSessions((current) =>
+        current.filter((session) => session.sessionId !== sessionId),
+      );
+    } catch {
+      setApprovalError("The remote connection could not be denied.");
+    } finally {
+      setApprovalBusy(false);
+    }
+  }
+
+  const pendingSession = pendingSessions.at(0);
+
   const remoteStatusLabel =
     remoteStatus.state === "online"
       ? "online"
@@ -379,7 +437,7 @@ export default function App() {
         </footer>
       </main>
       <SignInDialog
-        open={signInOpen}
+        open={signInOpen && !pendingSession}
         busy={accountStatus.state === "signing_in"}
         message={
           accountStatus.state === "error" ? accountStatus.message : undefined
@@ -388,7 +446,7 @@ export default function App() {
         onProvider={(provider) => void loginRemote(provider)}
       />
       <NewAgentDialog
-        open={agentDialogOpen}
+        open={agentDialogOpen && !pendingSession}
         agents={agentRuntimes}
         targets={agentTargets}
         initialCwd={activeTerminal?.cwd ?? defaultCwd}
@@ -408,7 +466,7 @@ export default function App() {
         onOpenAgentSettings={() => openSettings("agents")}
       />
       <SettingsDialog
-        open={settingsOpen}
+        open={settingsOpen && !pendingSession}
         initialSection={settingsSection}
         runtimes={agentRuntimes}
         setupKind={agentSetupKind}
@@ -423,6 +481,17 @@ export default function App() {
         }}
         onAgentSetup={(request) => void startAgentSetup(request)}
       />
+      {pendingSession ? (
+        <SessionApprovalDialog
+          session={pendingSession}
+          busy={approvalBusy}
+          error={approvalError}
+          onApprove={(approvedScopes) =>
+            void approveSession(pendingSession.sessionId, approvedScopes)
+          }
+          onDeny={() => void denySession(pendingSession.sessionId)}
+        />
+      ) : null}
     </React.Fragment>
   );
 }

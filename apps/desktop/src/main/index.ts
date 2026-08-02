@@ -23,7 +23,6 @@ import {
 import { startSingleInstanceApplication } from "./single-instance";
 import { buildBrowserWindowOptions } from "./window-options";
 import { RemoteHostController } from "./remote/host-controller";
-import type { RemoteSession } from "@codra/protocol";
 import {
   createNativePeerConnection,
   type NativeDataChannelModule,
@@ -110,23 +109,14 @@ async function startPrimaryInstance(): Promise<void> {
         peerName,
         iceServers,
       ),
-    onPendingSession: (session: RemoteSession) => {
-      void dialog
-        .showMessageBox({
-          type: "question",
-          buttons: ["거부", "승인"],
-          defaultId: 0,
-          cancelId: 0,
-          title: "CODRA 원격 연결 요청",
-          message: "새 원격 터미널 연결을 승인할까요?",
-          detail: `요청 장치 ${session.clientDeviceId.slice(0, 8)}…\n권한: ${session.requestedScopes.join(", ")}`,
-        })
-        .then((result) => {
-          if (result.response === 1)
-            return remoteHost.signSessionApproval(session);
-          return remoteHost.signSessionRejection(session);
-        })
-        .catch((error) => console.error("Remote approval failed", error));
+    ensureWindow: async () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+        return;
+      }
+      await createWindow();
     },
   });
   registerRemoteIpc({
