@@ -124,6 +124,30 @@ describe("native peer adapter", () => {
       ]),
     ).toThrow("HOST_TURN_UDP_UNAVAILABLE");
   });
+
+  it("gathers host candidates without any ICE server when relayOnly is false", () => {
+    let configuration: Record<string, unknown> | undefined;
+    const nativePeer = createNativePeerFake();
+    const module = {
+      PeerConnection: class {
+        constructor(_name: string, value: Record<string, unknown>) {
+          configuration = value;
+          return nativePeer;
+        }
+      },
+    } as unknown as NativeDataChannelModule;
+
+    createNativePeerConnection(module, "session-1", [], {
+      relayOnly: false,
+    });
+
+    expect(configuration).toMatchObject({
+      disableAutoNegotiation: true,
+      enableIceTcp: false,
+      iceTransportPolicy: "all",
+      iceServers: [],
+    });
+  });
 });
 
 function createNativeChannelFake(label: string) {

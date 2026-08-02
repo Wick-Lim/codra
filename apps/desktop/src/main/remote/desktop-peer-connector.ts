@@ -58,10 +58,16 @@ export interface DesktopPeerConnectorOptions {
   createPeer(
     peerName: string,
     iceServers: readonly IceServerInput[],
+    options: { relayOnly: boolean },
   ): PeerConnectionPort;
   hostServices(): RemoteHostServices | undefined;
   reportError(error: unknown): void;
   now?: () => number;
+}
+
+interface IceAcquisition {
+  iceServers: IceServerInput[];
+  relayOnly: boolean;
 }
 
 async function importPrivateKey(jwk: JsonWebKey): Promise<CryptoKey> {
@@ -123,8 +129,7 @@ export class DesktopPeerConnector {
     this.assertPeerBinding(session, peer, "client");
     const peerPublicKey = await validateAndImportPublicJwk(peer.publicKeyJwk);
     const hostSigner = await importPrivateKey(this.options.identity.privateKey);
-    const credentials = await issueTurnCredentials(
-      this.options.runtime.functions,
+    const { iceServers, relayOnly } = await this.acquireIceServers(
       session.sessionId,
     );
     const negotiationId = session.sessionId;
@@ -151,7 +156,8 @@ export class DesktopPeerConnector {
     });
     const nativePeer = this.options.createPeer(
       `host-${session.sessionId}`,
-      iceInputs(credentials),
+      iceServers,
+      { relayOnly },
     );
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -347,8 +353,7 @@ export class DesktopPeerConnector {
     hostPublicKey: CryptoKey,
   ): Promise<RemoteAgentChannelClient> {
     const signer = await importPrivateKey(this.options.identity.privateKey);
-    const credentials = await issueTurnCredentials(
-      this.options.runtime.functions,
+    const { iceServers, relayOnly } = await this.acquireIceServers(
       session.sessionId,
     );
     const negotiationId = session.sessionId;
@@ -375,7 +380,8 @@ export class DesktopPeerConnector {
     });
     const nativePeer = this.options.createPeer(
       `client-${session.sessionId}`,
-      iceInputs(credentials),
+      iceServers,
+      { relayOnly },
     );
     return new Promise<RemoteAgentChannelClient>((resolve, reject) => {
       let settled = false;
@@ -464,5 +470,32 @@ export class DesktopPeerConnector {
 
   private assertOpen(): void {
     if (this.closed) throw new Error("REMOTE_CONNECTOR_CLOSED");
+  }
+
+  /**
+   * Gated on `runtime.deployment.mode`, not on an environment variable: the
+   * emulator branch is only reachable when this connector was built with
+   * the emulator's `@codra/remote-firebase-config` binding, which is itself
+   * a build-time alias the release build never resolves to (it points at
+   * the production binding instead). A shipped build has no `runtime` whose
+   * `deployment.mode` can ever be `"emulator"`, so `issueTurnCredentials` is
+   * unconditionally reachable in production.
+   *
+   * The TURN callable requires a provider secret that the local emulator
+   * project has no way to hold, so calling it there always fails. Two
+   * loopback peers negotiate fine on host candidates without any TURN
+   * server, so the emulator path skips the callable entirely rather than
+   * stubbing its response, and asks for ICE servers without `relayOnly` so
+   * the native peer is not restricted to a relay it does not have.
+   */
+  private async acquireIceServers(sessionId: string): Promise<IceAcquisition> {
+    if (this.options.runtime.deployment.mode === "emulator") {
+      return { iceServers: [], relayOnly: false };
+    }
+    const credentials = await issueTurnCredentials(
+      this.options.runtime.functions,
+      sessionId,
+    );
+    return { iceServers: iceInputs(credentials), relayOnly: true };
   }
 }

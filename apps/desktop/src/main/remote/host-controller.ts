@@ -63,6 +63,7 @@ export interface RemoteHostControllerOptions {
   createPeer?(
     peerName: string,
     iceServers: readonly IceServerInput[],
+    options: { relayOnly: boolean },
   ): PeerConnectionPort;
   ensureWindow?(): Promise<void>;
 }

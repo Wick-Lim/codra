@@ -178,11 +178,21 @@ export function createNativePeerConnection(
   module: NativeDataChannelModule,
   peerName: string,
   iceServerInputs: readonly IceServerInput[],
+  options: { relayOnly: boolean } = { relayOnly: true },
 ): PeerConnectionPort {
-  const browserServers = normalizeBrowserIceServers(iceServerInputs);
-  const hostServers = normalizeHostIceServers(browserServers, {
-    relayOnly: true,
-  });
+  // The emulator path (DesktopPeerConnector.acquireIceServers) hands in no
+  // ICE server inputs at all, since it never calls the TURN callable there.
+  // normalizeBrowserIceServers rejects an empty list, so it is only invoked
+  // when there is something to normalize; normalizeHostIceServers is then
+  // called without `relayOnly` on that path, per the design, so an empty
+  // UDP relay set does not throw HOST_TURN_UDP_UNAVAILABLE.
+  const browserServers =
+    iceServerInputs.length > 0
+      ? normalizeBrowserIceServers(iceServerInputs)
+      : [];
+  const hostServers = options.relayOnly
+    ? normalizeHostIceServers(browserServers, { relayOnly: true })
+    : normalizeHostIceServers(browserServers);
   const configuration: RtcConfig = {
     iceServers: hostServers.map(
       ({ hostname, port, username, password, relayType }) => ({
@@ -195,7 +205,7 @@ export function createNativePeerConnection(
     ),
     disableAutoNegotiation: true,
     enableIceTcp: false,
-    iceTransportPolicy: "relay",
+    iceTransportPolicy: options.relayOnly ? "relay" : "all",
   };
   return new NativePeerAdapter(
     new module.PeerConnection(peerName, configuration),

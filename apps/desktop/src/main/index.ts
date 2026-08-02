@@ -103,11 +103,12 @@ async function startPrimaryInstance(): Promise<void> {
   const remoteHost = new RemoteHostController({
     userDataPath: app.getPath("userData"),
     reportError: (error) => console.error("Remote host error", error),
-    createPeer: (peerName, iceServers) =>
+    createPeer: (peerName, iceServers, options) =>
       createNativePeerConnection(
         requireFromMain("node-datachannel") as NativeDataChannelModule,
         peerName,
         iceServers,
+        options,
       ),
     ensureWindow: async () => {
       if (mainWindow && !mainWindow.isDestroyed()) {
