@@ -73,11 +73,24 @@ await writeFile(
   join(poisonedRoot, "apps/web/dist/assets/index-poison.js"),
   "const s = process.env.CLOUDFLARE_TURN_CONFIG;\n",
 );
+// A future contributor could import the remote-test auto-approve seam's
+// implementation file directly from shared main-process code instead of
+// only through the Vite alias, or read its env var outside the alias
+// swap. Neither mistake would touch electron.vite.config.ts, so
+// verify-remote-build-config.mjs would stay green; only the artifact
+// scanner would catch it.
+await writeFile(
+  join(poisonedRoot, "apps/desktop/out/main/session-auto-approve-leak.js"),
+  'const alias = "session-auto-approve-test-only";\n' +
+    "const flag = process.env.CODRA_REMOTE_TEST_AUTO_APPROVE;\n",
+);
 const poisoned = runScanner(poisonedRoot);
 assert.notEqual(poisoned.status, 0, "poisoned client artifacts must be denied");
 assert.match(poisoned.stderr, /firebase-api-key/u);
 assert.match(poisoned.stderr, /turn-url/u);
 assert.match(poisoned.stderr, /turn-secret-name/u);
+assert.match(poisoned.stderr, /session-auto-approve-test-alias/u);
+assert.match(poisoned.stderr, /remote-test-auto-approve-env/u);
 
 const emptyRoot = await mkdtemp(join(tmpdir(), "codra-scan-artifacts-empty-"));
 const unbuilt = runScanner(emptyRoot);

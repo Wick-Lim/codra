@@ -98,6 +98,15 @@ function buildDeviceEnv(
     if (value !== undefined) env[key] = value;
   }
   delete env.ELECTRON_RENDERER_URL;
+  // CODRA_REMOTE_TEST_AUTO_APPROVE must never reach a device by ambient
+  // inheritance from the shell or CI job that invoked Playwright — only a
+  // caller that explicitly opts in via `launchRemoteDevice`'s
+  // `autoApproveSessions` option should get it, via `overrides` below.
+  // Otherwise a developer or CI environment that happens to export this
+  // var globally would silently turn every spec's approval modal into an
+  // auto-approved no-op, including remote-direct's, which exists
+  // specifically to drive that modal by hand.
+  delete env.CODRA_REMOTE_TEST_AUTO_APPROVE;
   return { ...env, ...overrides };
 }
 
@@ -304,6 +313,10 @@ export async function launchRemoteDevice(options: {
   label: string;
   email: string;
   password: string;
+  // Opt-in only: buildDeviceEnv always strips any ambient
+  // CODRA_REMOTE_TEST_AUTO_APPROVE first, so a spec gets the remote-test
+  // auto-approve seam only by asking for it here, never by accident.
+  autoApproveSessions?: boolean;
 }): Promise<RemoteDeviceHandle> {
   const userDataDir = await mkdtemp(
     path.join(tmpdir(), `codra-remote-${options.label}-`),
@@ -317,6 +330,9 @@ export async function launchRemoteDevice(options: {
         CODRA_USER_DATA_DIR: userDataDir,
         CODRA_REMOTE_TEST_EMAIL: options.email,
         CODRA_REMOTE_TEST_PASSWORD: options.password,
+        ...(options.autoApproveSessions
+          ? { CODRA_REMOTE_TEST_AUTO_APPROVE: "1" }
+          : {}),
       }),
     });
     const pid = app.process().pid;

@@ -46,6 +46,12 @@
       "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
     },
     {
+      "id": "session-auto-approve-test-alias",
+      "kind": "literal",
+      "pattern": "session-auto-approve-test-only",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
       "id": "email-password-sign-in",
       "kind": "literal",
       "pattern": "signInWithEmailAndPassword",
@@ -55,6 +61,12 @@
       "id": "remote-test-credential-env",
       "kind": "literal",
       "pattern": "CODRA_REMOTE_TEST_EMAIL",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "remote-test-auto-approve-env",
+      "kind": "literal",
+      "pattern": "CODRA_REMOTE_TEST_AUTO_APPROVE",
       "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
     },
     {
