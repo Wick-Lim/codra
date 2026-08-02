@@ -1,14 +1,23 @@
 import type { FirebaseRuntime } from "@codra/firebase";
+import { shell } from "electron";
 import {
   bootstrapProductionDesktopAuth,
   bootstrapProductionDesktopLogin,
   type DesktopLoginBootstrapOptions,
   type DesktopLoginBootstrapResult,
 } from "./desktop-login";
-import { openDesktopAuthWindow } from "./auth-window";
 import type { DesktopAuthParentWindowLike } from "./auth-window";
 
 export const remoteAccountBootstrapBinding = "google-main" as const;
+
+function revealParentWindow(
+  parentWindow: DesktopAuthParentWindowLike | undefined,
+): void {
+  if (!parentWindow || parentWindow.isDestroyed()) return;
+  if (parentWindow.isMinimized()) parentWindow.restore();
+  if (!parentWindow.isVisible()) parentWindow.show();
+  parentWindow.focus();
+}
 
 export async function bootstrapRemoteAuth(
   runtime: FirebaseRuntime,
@@ -19,21 +28,21 @@ export async function bootstrapRemoteAuth(
   if (provider !== "google") throw new Error("AUTH_PROVIDER_UNAVAILABLE");
   if (runtime.deployment.mode !== "production")
     throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
-  const authHandlerUrl = runtime.deployment.firebaseAuthHandlerUrl;
-  await bootstrapProductionDesktopAuth(
-    runtime,
-    {
-      openExternal: (url, callbackUrl, deadlineSignal) => {
-        if (!callbackUrl) throw new Error("DESKTOP_LOGIN_CALLBACK_URL_MISSING");
-        return openDesktopAuthWindow(url, callbackUrl, {
-          authHandlerUrl,
-          parent: parentWindow,
-          signal: deadlineSignal,
-        });
+  try {
+    await bootstrapProductionDesktopAuth(
+      runtime,
+      {
+        openExternal: (url, callbackUrl) => {
+          if (!callbackUrl)
+            throw new Error("DESKTOP_LOGIN_CALLBACK_URL_MISSING");
+          return shell.openExternal(url);
+        },
       },
-    },
-    signal,
-  );
+      signal,
+    );
+  } finally {
+    revealParentWindow(parentWindow);
+  }
 }
 
 export async function bootstrapRemoteAccount(
@@ -42,14 +51,10 @@ export async function bootstrapRemoteAccount(
 ): Promise<DesktopLoginBootstrapResult> {
   if (runtime.deployment.mode !== "production")
     throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
-  const authHandlerUrl = runtime.deployment.firebaseAuthHandlerUrl;
   return bootstrapProductionDesktopLogin(runtime, options, {
-    openExternal: (url, callbackUrl, signal) => {
+    openExternal: (url, callbackUrl) => {
       if (!callbackUrl) throw new Error("DESKTOP_LOGIN_CALLBACK_URL_MISSING");
-      return openDesktopAuthWindow(url, callbackUrl, {
-        authHandlerUrl,
-        signal,
-      });
+      return shell.openExternal(url);
     },
   });
 }

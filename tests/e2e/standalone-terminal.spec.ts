@@ -214,13 +214,24 @@ test("chooses an agent workdir natively and keeps launch actions visible", async
 
     await page.getByRole("button", { name: "New agent" }).click();
 
+    const dialog = page.getByRole("dialog", { name: "New agent" });
+    const prompt = page.getByRole("textbox", { name: "First prompt" });
     const workdir = page.getByRole("textbox", { name: "Working directory" });
+    const agent = page.getByRole("combobox", { name: "Agent" });
+    await expect(dialog).toBeVisible();
+    await expect(agent).toBeVisible();
+    expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(740);
+    expect((await prompt.boundingBox())!.y).toBeLessThan(
+      (await workdir.boundingBox())!.y,
+    );
+    expect((await workdir.boundingBox())!.y).toBeLessThan(
+      (await agent.boundingBox())!.y,
+    );
+    expect((await agent.boundingBox())!.height).toBeLessThanOrEqual(40);
     await expect(workdir).toBeVisible();
     await expect(workdir).not.toHaveValue("");
     await expect(workdir).toHaveAttribute("readonly", "");
-    await expect(
-      page.getByRole("textbox", { name: "First prompt" }),
-    ).toBeFocused();
+    await expect(prompt).toBeFocused();
     await electronApp.evaluate(({ BrowserWindow, dialog }) => {
       Object.defineProperty(dialog, "showOpenDialog", {
         configurable: true,
@@ -251,6 +262,12 @@ test("chooses an agent workdir natively and keeps launch actions visible", async
       .getByRole("button", { name: "Choose working directory" })
       .click();
     await expect(workdir).toHaveValue("/tmp/codra-selected-workspace");
+    expect(
+      await dialog.evaluate((element) => {
+        const body = element.querySelector<HTMLElement>(".modal-body");
+        return body ? body.scrollWidth - body.clientWidth : 0;
+      }),
+    ).toBeLessThanOrEqual(1);
     const startButton = page.getByRole("button", { name: "Start agent" });
     const startBox = await startButton.boundingBox();
     const viewportHeight = await page.evaluate(() => window.innerHeight);

@@ -71,6 +71,23 @@ describe("AccountControl", () => {
     expect(onSignIn).toHaveBeenCalledOnce();
   });
 
+  it("lets the user cancel a browser sign-in that is still pending", async () => {
+    const onLogout = vi.fn();
+    render(
+      <AccountControl
+        accountStatus={{ state: "signing_in" }}
+        onSignIn={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onLogout={onLogout}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Cancel sign-in" }),
+    );
+    expect(onLogout).toHaveBeenCalledOnce();
+  });
+
   it("falls back to initials when the profile image cannot load", () => {
     render(
       <AccountControl
@@ -102,6 +119,7 @@ describe("SignInDialog", () => {
     expect(
       screen.getByRole("dialog", { name: "Sign in to CODRA" }),
     ).toBeVisible();
+    expect(screen.getByText("Opens in your default browser")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: /Google/ }));
     expect(onProvider).toHaveBeenCalledWith("google");
     expect(

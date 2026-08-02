@@ -51,7 +51,6 @@ export function NewAgentDialog({
   onOpenAgentSettings = () => undefined,
 }: NewAgentDialogProps) {
   const [selectedKind, setSelectedKind] = React.useState<AgentKind>();
-  const [query, setQuery] = React.useState("");
   const [modelChoices, setModelChoices] = React.useState<RuntimeValues>({});
   const [customModels, setCustomModels] = React.useState<RuntimeValues>({});
   const [effortChoices, setEffortChoices] = React.useState<RuntimeValues>({});
@@ -65,7 +64,6 @@ export function NewAgentDialog({
   React.useEffect(() => {
     if (!open) return;
     setSelectedKind(undefined);
-    setQuery("");
     setModelChoices({});
     setCustomModels({});
     setEffortChoices({});
@@ -91,19 +89,12 @@ export function NewAgentDialog({
     });
   }, [agents, open]);
 
-  const normalizedQuery = query.trim().toLocaleLowerCase();
-  const visibleAgents = agents.filter((agent) => {
-    if (!normalizedQuery) return true;
-    return `${agent.label} ${agent.kind} ${agent.description}`
-      .toLocaleLowerCase()
-      .includes(normalizedQuery);
-  });
   const selectedRuntime = agents.find(
     (runtime) => runtime.kind === selectedKind,
   );
   React.useEffect(() => {
-    if (open && selectedRuntime) promptRef.current?.focus();
-  }, [open, selectedRuntime]);
+    if (open) promptRef.current?.focus();
+  }, [open]);
   const modelChoice = selectedRuntime
     ? (modelChoices[selectedRuntime.kind] ?? initialModel(selectedRuntime))
     : "";
@@ -171,172 +162,113 @@ export function NewAgentDialog({
           );
         }}
       >
-        <div className="agent-catalog-layout">
-          <aside className="agent-catalog-panel" aria-label="Agent catalog">
-            <label className="agent-search-field">
-              <span className="agent-search-label">Search agents</span>
-              <span className="agent-search-icon" aria-hidden="true">
-                /
-              </span>
-              <input
-                type="search"
-                aria-label="Search agents"
-                value={query}
-                placeholder="Filter runtimes"
+        <div className="agent-launch-stack">
+          <section
+            className="agent-context-panel"
+            aria-label="Task and workspace"
+          >
+            <label className="agent-prompt-field">
+              <span>First prompt</span>
+              <textarea
+                ref={promptRef}
+                autoFocus
+                required
+                aria-label="First prompt"
+                value={prompt}
+                maxLength={16_000}
+                rows={8}
                 disabled={busy}
-                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Describe the first task for this agent…"
+                onChange={(event) => setPrompt(event.currentTarget.value)}
               />
+              <small>{prompt.length.toLocaleString()} / 16,000</small>
             </label>
 
-            <fieldset className="agent-picker">
-              <legend>Agent runtime</legend>
-              <div className="agent-runtime-list">
-                {visibleAgents.map((agent) => (
-                  <label
-                    className="agent-option"
-                    data-selected={selectedKind === agent.kind}
-                    data-available={agent.available}
-                    key={agent.kind}
-                  >
-                    <input
-                      type="radio"
-                      name="agent-kind"
-                      value={agent.kind}
-                      checked={selectedKind === agent.kind}
-                      disabled={busy}
-                      onChange={() => selectRuntime(agent.kind)}
-                    />
-                    <span className="agent-glyph" aria-hidden="true">
-                      {agentGlyph(agent.kind)}
-                    </span>
-                    <span className="agent-option-copy">
-                      <strong>{agent.label}</strong>
-                      <small>
-                        {agent.available ? "Ready" : "Not installed"}
-                      </small>
-                    </span>
-                    <span className="agent-radio-mark" aria-hidden="true" />
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            {visibleAgents.length === 0 ? (
-              <p className="agent-catalog-empty">No matching runtimes.</p>
-            ) : null}
-            {!agents.some((agent) => agent.available) ? (
-              <p className="agent-empty-state">
-                No supported agent CLI was found.
-              </p>
-            ) : null}
-          </aside>
-
-          <section className="agent-config-panel" aria-label="Agent launch">
-            {selectedRuntime ? (
-              <React.Fragment>
-                <header className="agent-config-header">
-                  <div className="agent-config-identity">
-                    <span
-                      className="agent-glyph agent-config-glyph"
-                      aria-hidden="true"
-                    >
-                      {agentGlyph(selectedRuntime.kind)}
-                    </span>
-                    <div>
-                      <span className="agent-config-kicker">
-                        {selectedRuntime.kind}
-                      </span>
-                      <h3>{selectedRuntime.label}</h3>
-                    </div>
-                  </div>
-                  <span
-                    className="agent-availability"
-                    data-available={selectedRuntime.available}
-                  >
-                    {selectedRuntime.available ? "CLI READY" : "CLI MISSING"}
-                  </span>
-                </header>
-                <p className="agent-description">
-                  {selectedRuntime.description}
-                </p>
-
-                <label className="agent-prompt-field">
-                  <span>First prompt</span>
-                  <textarea
-                    ref={promptRef}
-                    autoFocus
-                    required
-                    aria-label="First prompt"
-                    value={prompt}
-                    maxLength={16_000}
-                    rows={7}
-                    disabled={busy}
-                    placeholder="Describe the first task for this agent…"
-                    onChange={(event) => setPrompt(event.currentTarget.value)}
-                  />
-                  <small>{prompt.length.toLocaleString()} / 16,000</small>
-                </label>
-
-                <div className="agent-workdir-field">
-                  <label htmlFor={workingDirectoryId}>Working directory</label>
-                  <span className="agent-workdir-control">
-                    <span className="agent-workdir-prompt" aria-hidden="true">
-                      ▸
-                    </span>
-                    <input
-                      id={workingDirectoryId}
-                      required
-                      readOnly
-                      aria-label="Working directory"
-                      value={workingDirectory}
-                      maxLength={4096}
-                      disabled={busy || choosingCwd}
-                      autoComplete="off"
-                      spellCheck={false}
-                      placeholder="/path/to/workspace"
-                    />
-                    <button
-                      type="button"
-                      aria-label="Choose working directory"
-                      disabled={busy || choosingCwd}
-                      onClick={() => {
-                        setChoosingCwd(true);
-                        void onChooseCwd(cwd)
-                          .then((selectedCwd) => {
-                            if (selectedCwd) setWorkingDirectory(selectedCwd);
-                          })
-                          .catch(() => undefined)
-                          .finally(() => setChoosingCwd(false));
-                      }}
-                    >
-                      {choosingCwd ? "Choosing…" : "Browse…"}
-                    </button>
-                  </span>
-                </div>
-
-                {!selectedRuntime.available ? (
-                  <div className="agent-install-hint">
-                    <div>
-                      <strong>Runtime setup is in Settings</strong>
-                      <p>{selectedRuntime.installHint}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={onOpenAgentSettings}
-                      disabled={busy}
-                    >
-                      Open Agent settings
-                    </button>
-                  </div>
-                ) : null}
-
-                <p className="agent-run-configuration-label">
-                  Run configuration
-                </p>
-                <div
-                  className="agent-model-stack"
-                  data-has-effort={effortOptions.length > 0}
+            <div className="agent-workdir-field">
+              <label htmlFor={workingDirectoryId}>Working directory</label>
+              <span className="agent-workdir-control">
+                <span className="agent-workdir-prompt" aria-hidden="true">
+                  ▸
+                </span>
+                <input
+                  id={workingDirectoryId}
+                  required
+                  readOnly
+                  aria-label="Working directory"
+                  value={workingDirectory}
+                  maxLength={4096}
+                  disabled={busy || choosingCwd}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="/path/to/workspace"
+                />
+                <button
+                  type="button"
+                  aria-label="Choose working directory"
+                  disabled={busy || choosingCwd}
+                  onClick={() => {
+                    setChoosingCwd(true);
+                    void onChooseCwd(cwd)
+                      .then((selectedCwd) => {
+                        if (selectedCwd) setWorkingDirectory(selectedCwd);
+                      })
+                      .catch(() => undefined)
+                      .finally(() => setChoosingCwd(false));
+                  }}
                 >
+                  {choosingCwd ? "Choosing…" : "Browse…"}
+                </button>
+              </span>
+            </div>
+          </section>
+
+          <section
+            className="agent-runtime-panel"
+            aria-label="Runtime configuration"
+          >
+            <header className="agent-runtime-header">
+              <div>
+                <span>Runtime</span>
+                <h3>Run configuration</h3>
+              </div>
+              {selectedRuntime ? (
+                <span
+                  className="agent-availability"
+                  data-available={selectedRuntime.available}
+                >
+                  {selectedRuntime.available ? "CLI READY" : "CLI MISSING"}
+                </span>
+              ) : null}
+            </header>
+
+            <div
+              className="agent-runtime-grid"
+              data-has-effort={effortOptions.length > 0}
+            >
+              <label className="agent-runtime-field">
+                <span>Agent</span>
+                <select
+                  aria-label="Agent"
+                  value={selectedKind ?? ""}
+                  disabled={busy || agents.length === 0}
+                  onChange={(event) =>
+                    selectRuntime(event.currentTarget.value as AgentKind)
+                  }
+                >
+                  {agents.length === 0 ? (
+                    <option value="">No runtimes detected</option>
+                  ) : null}
+                  {agents.map((agent) => (
+                    <option value={agent.kind} key={agent.kind}>
+                      {agent.label}
+                      {agent.available ? "" : " — Not installed"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {selectedRuntime ? (
+                <React.Fragment>
                   <label className="agent-model-field">
                     <span>Model</span>
                     <select
@@ -408,12 +340,43 @@ export function NewAgentDialog({
                       />
                     </label>
                   ) : null}
-                  <p className="agent-model-note">
-                    {selectedRuntime.kind === "ollama"
-                      ? "Models discovered from this machine's Ollama library."
-                      : "Use the provider default or pin a model for this session."}
+                </React.Fragment>
+              ) : null}
+            </div>
+
+            {selectedRuntime ? (
+              <React.Fragment>
+                <div className="agent-runtime-summary">
+                  <span className="agent-glyph" aria-hidden="true">
+                    {agentGlyph(selectedRuntime.kind)}
+                  </span>
+                  <p>
+                    <strong>{selectedRuntime.label}</strong>
+                    <span>{selectedRuntime.description}</span>
                   </p>
                 </div>
+
+                <p className="agent-model-note">
+                  {selectedRuntime.kind === "ollama"
+                    ? "Models come from this machine's Ollama library."
+                    : "Use the provider default or pin a model for this session."}
+                </p>
+
+                {!selectedRuntime.available ? (
+                  <div className="agent-install-hint">
+                    <div>
+                      <strong>Runtime setup is in Settings</strong>
+                      <p>{selectedRuntime.installHint}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onOpenAgentSettings}
+                      disabled={busy}
+                    >
+                      Open Agent settings
+                    </button>
+                  </div>
+                ) : null}
 
                 {selectedRuntime.supportsYolo ? (
                   <React.Fragment>
@@ -455,8 +418,14 @@ export function NewAgentDialog({
                 )}
               </React.Fragment>
             ) : (
-              <p className="agent-catalog-empty">No agent runtime detected.</p>
+              <p className="agent-runtime-empty">No agent runtime detected.</p>
             )}
+
+            {agents.length > 0 && !agents.some((agent) => agent.available) ? (
+              <p className="agent-empty-state">
+                No supported agent CLI was found.
+              </p>
+            ) : null}
           </section>
         </div>
 

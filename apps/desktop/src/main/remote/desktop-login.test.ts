@@ -334,6 +334,30 @@ describe("desktop login loopback", () => {
     await listener.close();
   });
 
+  it("settles a Google access-denied callback as an immediate cancellation", async () => {
+    const listener = await createDesktopLoginCallbackListener({
+      attemptId,
+      state,
+      port: 0,
+      timeoutMs: 100,
+    });
+    const response = request(
+      callbackTarget(
+        listener.port,
+        "?error=access_denied&state=opaque-google-state",
+      ),
+    );
+
+    try {
+      await expect(listener.waitForCallback()).rejects.toThrow(
+        "DESKTOP_LOGIN_CANCELLED",
+      );
+      expect(await response).toBe(200);
+    } finally {
+      await listener.close();
+    }
+  });
+
   it("uses the registered production loopback port by default", async () => {
     const listener = await createDesktopLoginCallbackListener({
       attemptId,

@@ -35,6 +35,7 @@ const MAX_CALLBACK_TARGET_BYTES = 4 * 1024;
 const PLACEHOLDER_SIGNATURE = encodeBase64Url(new Uint8Array(64));
 
 const CALLBACK_SUCCESS_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>CODRA sign-in complete</title></head><body><p>You can return to CODRA.</p></body></html>`;
+const CALLBACK_CANCELLED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>CODRA sign-in cancelled</title></head><body><p>Sign-in was cancelled. You can return to CODRA.</p></body></html>`;
 
 export interface DesktopLoginBootstrapResult {
   token: string;
@@ -139,10 +140,10 @@ function hasUnexpectedRequestBody(request: CallbackRequest): boolean {
  * This is deliberately strict: only the exact top-level redirect emitted by
  * Google OAuth is allowed to complete a local sign-in attempt.
  */
-export function parseDesktopLoginCallback(
+function parseLoopbackCallbackUrl(
   request: CallbackRequest,
-  expected: { port: number; attemptId: string; state: string },
-): DesktopLoginCallback | undefined {
+  expected: { port: number },
+): URL | undefined {
   if (request.method !== "GET") return undefined;
   if (request.headers.host !== `127.0.0.1:${expected.port}`) return undefined;
   if (requestTargetByteLength(request) > MAX_CALLBACK_TARGET_BYTES)
@@ -155,7 +156,15 @@ export function parseDesktopLoginCallback(
   } catch {
     return undefined;
   }
-  if (url.pathname !== CALLBACK_PATH) return undefined;
+  return url.pathname === CALLBACK_PATH ? url : undefined;
+}
+
+export function parseDesktopLoginCallback(
+  request: CallbackRequest,
+  expected: { port: number; attemptId: string; state: string },
+): DesktopLoginCallback | undefined {
+  const url = parseLoopbackCallbackUrl(request, expected);
+  if (!url) return undefined;
   // Identity Toolkit creates the OAuth state used by Google. It is different
   // from the CODRA transaction state, which is checked when authorizing the
   // Firestore transaction and again during token redemption.
@@ -196,6 +205,38 @@ export function parseDesktopLoginCallback(
     state,
     postBody: url.search.slice(1),
   };
+}
+
+function isDesktopLoginCancellation(
+  request: CallbackRequest,
+  expected: { port: number },
+): boolean {
+  const url = parseLoopbackCallbackUrl(request, expected);
+  if (!url) return false;
+  const requiredKeys = ["error", "state"];
+  const allowedKeys = [
+    "error",
+    "state",
+    "error_description",
+    "error_uri",
+    "iss",
+  ];
+  const keys = [...url.searchParams.keys()];
+  if (
+    keys.length < requiredKeys.length ||
+    keys.some((key) => !allowedKeys.includes(key)) ||
+    allowedKeys.some((key) => url.searchParams.getAll(key).length > 1) ||
+    requiredKeys.some((key) => url.searchParams.getAll(key).length !== 1)
+  ) {
+    return false;
+  }
+  const state = url.searchParams.get("state");
+  return (
+    url.searchParams.get("error") === "access_denied" &&
+    typeof state === "string" &&
+    state.length > 0 &&
+    state.length <= 4_096
+  );
 }
 
 function sendLoopbackError(response: ServerResponse, status: number): void {
@@ -254,6 +295,22 @@ export async function createDesktopLoginCallbackListener(options: {
     request.resume();
     if (settled) {
       sendLoopbackError(response, 409);
+      return;
+    }
+    if (isDesktopLoginCancellation(request, { port })) {
+      settled = true;
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      response.writeHead(200, {
+        "Cache-Control": "no-store",
+        "Content-Type": "text/html; charset=utf-8",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+      });
+      response.once("finish", () => {
+        rejectCallback(new Error("DESKTOP_LOGIN_CANCELLED"));
+        void close();
+      });
+      response.end(CALLBACK_CANCELLED_HTML);
       return;
     }
     const accepted = parseDesktopLoginCallback(request, {

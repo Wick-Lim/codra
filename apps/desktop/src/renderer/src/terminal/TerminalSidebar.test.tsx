@@ -904,7 +904,10 @@ describe("App terminal workspace", () => {
     expect(
       screen.getByRole("textbox", { name: "Working directory" }),
     ).toHaveValue("/Users/codra");
-    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "gemini",
+    );
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
       "pro",
@@ -994,7 +997,10 @@ describe("App terminal workspace", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "New agent" }),
     );
-    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "gemini",
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Open Agent settings" }),
     );

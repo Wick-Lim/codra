@@ -84,19 +84,20 @@ export function AccountControl({
         <button
           className="account-trigger"
           type="button"
-          aria-label="Sign in to CODRA"
-          disabled={busy}
-          onClick={onSignIn}
+          aria-label={busy ? "Cancel sign-in" : "Sign in to CODRA"}
+          onClick={busy ? onLogout : onSignIn}
         >
           <span className="account-avatar-fallback" aria-hidden="true">
-            {busy ? "··" : "C"}
+            {busy ? "×" : "C"}
           </span>
           <span className="account-copy">
-            <strong>{busy ? "Signing in…" : "Sign in"}</strong>
-            <small>Remote access & settings</small>
+            <strong>{busy ? "Cancel sign-in" : "Sign in"}</strong>
+            <small>
+              {busy ? "Waiting for your browser" : "Remote access & settings"}
+            </small>
           </span>
           <span className="account-chevron" aria-hidden="true">
-            →
+            {busy ? "×" : "→"}
           </span>
         </button>
         {accountStatus.state === "error" ? (

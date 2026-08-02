@@ -97,7 +97,7 @@ const agents: AgentRuntime[] = [
 const cancelCwdSelection = async (): Promise<null> => null;
 
 describe("NewAgentDialog", () => {
-  it("opens prompt-first before optional run configuration", async () => {
+  it("places global task and workspace before compact runtime configuration", async () => {
     render(
       <NewAgentDialog
         open
@@ -113,18 +113,37 @@ describe("NewAgentDialog", () => {
     const prompt = await screen.findByRole("textbox", {
       name: "First prompt",
     });
+    const workdir = screen.getByRole("textbox", {
+      name: "Working directory",
+    });
+    const agent = screen.getByRole("combobox", { name: "Agent" });
     const model = screen.getByRole("combobox", { name: "Model" });
+    expect(workdir).toHaveValue("/workspace/codra");
+    expect(workdir).toHaveAttribute("readonly");
     expect(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    ).toHaveValue("/workspace/codra");
+      screen
+        .getByRole("region", { name: "Task and workspace" })
+        .contains(prompt),
+    ).toBe(true);
     expect(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    ).toHaveAttribute("readonly");
+      screen
+        .getByRole("region", { name: "Runtime configuration" })
+        .contains(agent),
+    ).toBe(true);
     await vi.waitFor(() => expect(prompt).toHaveFocus());
     expect(prompt).toBeRequired();
     expect(
-      prompt.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING,
+      prompt.compareDocumentPosition(workdir) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(
+      workdir.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      agent.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
   });
 
   it("routes a missing runtime to settings without starting setup or an agent", async () => {
@@ -142,7 +161,10 @@ describe("NewAgentDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "gemini",
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Open Agent settings" }),
     );
@@ -166,7 +188,17 @@ describe("NewAgentDialog", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "New agent" })).toBeVisible();
-    await userEvent.click(screen.getByRole("radio", { name: /Claude Code/ }));
+    const workingDirectory = screen.getByRole("textbox", {
+      name: "Working directory",
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose working directory" }),
+    );
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "claude",
+    );
+    expect(workingDirectory).toHaveValue("/workspace/auth");
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
       "sonnet",
@@ -176,12 +208,6 @@ describe("NewAgentDialog", () => {
       "high",
     );
     await userEvent.click(screen.getByRole("switch", { name: "YOLO mode" }));
-    const workingDirectory = screen.getByRole("textbox", {
-      name: "Working directory",
-    });
-    await userEvent.click(
-      screen.getByRole("button", { name: "Choose working directory" }),
-    );
     expect(onChooseCwd).toHaveBeenCalledWith("/workspace/codra");
     expect(workingDirectory).toHaveValue("/workspace/auth");
     await userEvent.type(
@@ -225,7 +251,7 @@ describe("NewAgentDialog", () => {
     ).toHaveValue("/workspace/codra");
   });
 
-  it("uses a searchable vertical catalog and exposes unavailable runtime guidance", async () => {
+  it("uses a compact scalable selector and exposes unavailable runtime guidance", async () => {
     const { rerender } = render(
       <NewAgentDialog
         open
@@ -237,16 +263,17 @@ describe("NewAgentDialog", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("searchbox", { name: "Search agents" }),
-    ).toBeVisible();
-    await userEvent.type(
-      screen.getByRole("searchbox", { name: "Search agents" }),
-      "gemini",
+    const agent = screen.getByRole("combobox", { name: "Agent" });
+    expect(agent).toBeVisible();
+    expect(screen.getAllByRole("option")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ value: "codex" }),
+        expect.objectContaining({ value: "claude" }),
+        expect.objectContaining({ value: "gemini" }),
+        expect.objectContaining({ value: "ollama" }),
+      ]),
     );
-    expect(screen.getByRole("radio", { name: /Gemini CLI/ })).toBeVisible();
-    expect(screen.queryByRole("radio", { name: /Codex CLI/ })).toBeNull();
-    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(agent, "gemini");
     expect(
       screen.getByText("Install @google/gemini-cli to use this runtime."),
     ).toBeVisible();
@@ -279,7 +306,10 @@ describe("NewAgentDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("radio", { name: /Ollama/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "ollama",
+    );
     expect(screen.queryByRole("switch", { name: "YOLO mode" })).toBeNull();
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
@@ -359,8 +389,34 @@ describe("NewAgentDialog", () => {
       />,
     );
 
-    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Agent" }),
+      "gemini",
+    );
     expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+  });
+
+  it("keeps task and workspace available when no runtime is detected", async () => {
+    render(
+      <NewAgentDialog
+        open
+        agents={[]}
+        initialCwd="/workspace/codra"
+        onClose={vi.fn()}
+        onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("textbox", { name: "First prompt" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    ).toHaveValue("/workspace/codra");
+    expect(screen.getByRole("combobox", { name: "Agent" })).toBeDisabled();
+    expect(screen.getByText("No agent runtime detected.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
   });
 
   it("requires a first prompt before starting", async () => {

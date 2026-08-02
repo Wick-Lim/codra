@@ -936,7 +936,7 @@ button:focus-visible,
 }
 
 .new-agent-dialog {
-  width: min(780px, calc(100vw - 48px));
+  width: min(720px, calc(100vw - 48px));
 }
 
 .new-agent-dialog .modal-header {
@@ -948,357 +948,42 @@ button:focus-visible,
 }
 
 .new-agent-dialog .modal-body {
-  height: calc(100vh - 168px);
   max-height: calc(100vh - 168px);
-  padding-block: 16px 18px;
-  overflow: hidden;
+  padding: 16px 18px 18px;
+  overflow: auto;
+  scrollbar-color: var(--steel) transparent;
 }
 
-.agent-launch-form {
+.agent-launch-form,
+.agent-launch-stack {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 14px;
-  height: 100%;
-  min-height: 0;
+  gap: 12px;
+  min-width: 0;
 }
 
-.agent-catalog-layout {
-  display: grid;
-  grid-template-columns: 210px minmax(0, 1fr);
-  min-height: 0;
-  overflow: hidden;
+.agent-context-panel,
+.agent-runtime-panel {
+  min-width: 0;
   background: var(--obsidian);
   border: 1px solid var(--steel-soft);
   border-radius: 8px;
 }
 
-.agent-catalog-panel {
-  min-width: 0;
-  padding: 12px;
-  overflow: auto;
+.agent-context-panel {
+  padding: 15px 16px 14px;
+  box-shadow: inset 2px 0 0 rgb(145 167 255 / 48%);
+}
+
+.agent-runtime-panel {
+  padding: 12px 14px;
   background:
-    linear-gradient(180deg, rgb(145 167 255 / 4%), transparent 140px),
+    linear-gradient(90deg, rgb(145 167 255 / 4%), transparent 48%),
     var(--bulkhead);
-  border-right: 1px solid var(--steel-soft);
 }
 
-.agent-search-field {
-  position: relative;
-  display: grid;
-  gap: 7px;
-}
-
-.agent-search-label {
-  color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 8px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.agent-search-icon {
-  position: absolute;
-  bottom: 10px;
-  left: 10px;
-  color: var(--signal);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 10px;
-  pointer-events: none;
-}
-
-.agent-search-field input {
-  width: 100%;
-  height: 32px;
-  padding: 6px 9px 6px 26px;
-  color: var(--fog);
-  caret-color: var(--signal);
-  background: var(--obsidian);
-  border: 1px solid var(--steel);
-  border-radius: 5px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 9px;
-}
-
-.agent-search-field input:focus {
-  border-color: var(--signal);
-  outline: 2px solid rgb(145 167 255 / 13%);
-}
-
-.agent-search-field input::-webkit-search-cancel-button {
-  filter: invert(0.7);
-}
-
-.agent-picker {
-  min-width: 0;
-  margin: 10px 0 0;
-  padding: 0;
-  border: 0;
-}
-
-.agent-picker legend,
-.agent-prompt-field > span,
-.agent-workdir-field > label {
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 8px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.agent-runtime-list {
-  display: grid;
-  gap: 5px;
-  max-height: 350px;
-  overflow: auto;
-  scrollbar-color: var(--steel) transparent;
-}
-
-.agent-option {
-  position: relative;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 11px;
-  align-items: center;
-  gap: 8px;
-  min-height: 50px;
-  padding: 7px 8px;
-  color: var(--fog-soft);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
-}
-
-.agent-option:hover {
-  background: color-mix(in srgb, var(--deck) 82%, var(--signal-soft));
-  border-color: color-mix(in srgb, var(--steel) 45%, var(--signal));
-}
-
-.agent-option[data-selected="true"] {
-  background: color-mix(in srgb, var(--deck) 78%, var(--signal-soft));
-  border-color: var(--signal);
-  box-shadow: inset 2px 0 0 var(--signal);
-}
-
-.agent-option[data-available="false"] .agent-glyph,
-.agent-option[data-available="false"] .agent-option-copy {
-  opacity: 0.54;
-}
-
-.agent-option:focus-within {
-  outline: 2px solid var(--signal);
-  outline-offset: 2px;
-}
-
-.agent-option input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.agent-glyph {
-  display: grid;
-  width: 27px;
-  height: 27px;
-  place-items: center;
-  color: var(--signal);
-  background: var(--bulkhead);
-  border: 1px solid var(--steel);
-  border-radius: 5px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 10px;
-  font-weight: 750;
-}
-
-.agent-option-copy {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.agent-option-copy strong {
-  overflow: hidden;
-  color: var(--fog);
-  font-size: 10px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-option-copy small {
-  color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 8px;
-}
-
-.agent-radio-mark {
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--steel);
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 3px var(--deck);
-}
-
-.agent-option[data-selected="true"] .agent-radio-mark {
-  background: var(--signal);
-  border-color: var(--signal);
-}
-
-.agent-empty-state {
-  margin: 10px 2px 0;
-  color: var(--warning);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 9px;
-}
-
-.agent-catalog-empty {
-  margin: 14px 2px;
-  color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.agent-config-panel {
-  min-width: 0;
-  padding: 18px 20px;
-  overflow: auto;
-  scrollbar-color: var(--steel) transparent;
-}
-
-.agent-config-header,
-.agent-config-identity {
-  display: flex;
-  align-items: center;
-}
-
-.agent-config-header {
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.agent-config-identity {
-  gap: 10px;
-  min-width: 0;
-}
-
-.agent-config-glyph {
-  width: 36px;
-  height: 36px;
-  font-size: 11px;
-}
-
-.agent-config-kicker {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--muted-dim);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 7px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.agent-config-header h3 {
-  margin: 0;
-  color: var(--fog);
-  font-size: 15px;
-  letter-spacing: -0.02em;
-}
-
-.agent-availability {
-  flex: none;
-  padding: 4px 6px;
-  color: var(--muted);
-  background: var(--bulkhead);
-  border: 1px solid var(--steel);
-  border-radius: 4px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 7px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.agent-availability[data-available="true"] {
-  color: var(--signal);
-  border-color: rgb(145 167 255 / 38%);
-}
-
-.agent-description {
-  margin: 9px 0 13px;
-  color: var(--muted);
-  font-size: 9px;
-  line-height: 1.5;
-}
-
-.agent-install-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin: 0 0 15px;
-  padding: 9px 10px;
-  color: #f1c58c;
-  background: rgb(216 162 94 / 8%);
-  border: 1px solid rgb(216 162 94 / 23%);
-  border-radius: 5px;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 8px;
-  line-height: 1.45;
-}
-
-.agent-install-hint strong {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--fog-soft);
-  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-  font-size: 9px;
-}
-
-.agent-install-hint p {
-  margin: 0;
-}
-
-.agent-install-hint button {
-  flex: 0 0 auto;
-  min-height: 29px;
-  padding: 5px 9px;
-  color: var(--fog);
-  background: var(--bulkhead-raised);
-  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--steel));
-  border-radius: 5px;
-  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
-  font-size: 8px;
-  font-weight: 700;
-}
-
-.agent-install-hint button:not(:disabled):hover {
-  border-color: var(--warning);
-}
-
-.agent-run-configuration-label {
-  margin: 2px 0 8px;
-  color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 8px;
-  font-weight: 650;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.agent-model-stack {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  margin-bottom: 15px;
-}
-
+.agent-prompt-field,
+.agent-workdir-field,
+.agent-runtime-field,
 .agent-model-field,
 .agent-effort-field,
 .agent-custom-model-field {
@@ -1306,9 +991,13 @@ button:focus-visible,
   gap: 7px;
 }
 
+.agent-prompt-field > span,
+.agent-workdir-field > label,
+.agent-runtime-field > span,
 .agent-model-field > span,
 .agent-effort-field > span,
-.agent-custom-model-field > span {
+.agent-custom-model-field > span,
+.agent-runtime-header > div > span {
   color: var(--muted);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 8px;
@@ -1317,50 +1006,42 @@ button:focus-visible,
   text-transform: uppercase;
 }
 
-.agent-model-field select,
-.agent-effort-field select,
-.agent-custom-model-field input {
+.agent-prompt-field textarea {
   width: 100%;
-  height: 34px;
-  padding: 6px 9px;
+  min-height: 158px;
+  padding: 13px 14px;
+  resize: vertical;
   color: var(--fog);
-  background: var(--deck);
-  border: 1px solid var(--steel);
-  border-radius: 5px;
+  caret-color: var(--signal);
+  background: #080d14;
+  border: 1px solid color-mix(in srgb, var(--steel) 70%, var(--signal));
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 9px;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
-.agent-model-field select:focus,
-.agent-effort-field select:focus,
-.agent-custom-model-field input:focus {
+.agent-prompt-field textarea::placeholder {
+  color: var(--muted-dim);
+}
+
+.agent-prompt-field textarea:focus {
   border-color: var(--signal);
   outline: 2px solid rgb(145 167 255 / 13%);
+  outline-offset: 0;
 }
 
-.agent-model-stack[data-has-effort="false"] .agent-model-field,
-.agent-custom-model-field {
-  grid-column: 1 / -1;
-}
-
-.agent-model-note {
-  grid-column: 1 / -1;
-  margin: -1px 0 0;
+.agent-prompt-field > small {
+  justify-self: end;
+  margin-top: -2px;
   color: var(--muted-dim);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 7px;
-  line-height: 1.45;
-}
-
-.agent-prompt-field {
-  display: grid;
-  margin-bottom: 10px;
 }
 
 .agent-workdir-field {
-  display: grid;
-  gap: 7px;
-  margin-bottom: 15px;
+  margin-top: 10px;
 }
 
 .agent-workdir-control {
@@ -1431,38 +1112,193 @@ button:focus-visible,
   opacity: 0.58;
 }
 
-.agent-prompt-field textarea {
-  width: 100%;
-  min-height: 142px;
-  padding: 13px 14px;
-  resize: vertical;
-  color: var(--fog);
-  caret-color: var(--signal);
-  background: var(--obsidian);
-  border: 1px solid color-mix(in srgb, var(--steel) 76%, var(--signal));
-  border-radius: 7px;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+.agent-runtime-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--steel-soft);
+}
+
+.agent-runtime-header h3 {
+  margin: 3px 0 0;
+  color: var(--fog-soft);
   font-size: 11px;
-  line-height: 1.6;
+  font-weight: 700;
 }
 
-.agent-prompt-field textarea::placeholder {
-  color: var(--muted-dim);
+.agent-availability {
+  flex: none;
+  padding: 4px 6px;
+  color: var(--muted);
+  background: var(--obsidian);
+  border: 1px solid var(--steel);
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
-.agent-prompt-field textarea:focus {
+.agent-availability[data-available="true"] {
+  color: var(--signal);
+  border-color: rgb(145 167 255 / 38%);
+}
+
+.agent-runtime-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) minmax(0, 0.78fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.agent-runtime-grid[data-has-effort="false"] {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+
+.agent-custom-model-field {
+  grid-column: 2 / -1;
+}
+
+.agent-runtime-grid > .agent-runtime-field:only-child {
+  grid-column: 1 / -1;
+}
+
+.agent-runtime-field select,
+.agent-model-field select,
+.agent-effort-field select,
+.agent-custom-model-field input {
+  width: 100%;
+  height: 34px;
+  padding: 6px 9px;
+  color: var(--fog);
+  background: var(--deck);
+  border: 1px solid var(--steel);
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+}
+
+.agent-runtime-field select:focus,
+.agent-model-field select:focus,
+.agent-effort-field select:focus,
+.agent-custom-model-field input:focus {
   border-color: var(--signal);
   outline: 2px solid rgb(145 167 255 / 13%);
-  outline-offset: 0;
 }
 
-.agent-prompt-field > small {
-  justify-self: end;
-  margin-top: 5px;
+.agent-runtime-summary {
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--steel-soft);
+}
+
+.agent-glyph {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  color: var(--signal);
+  background: var(--obsidian);
+  border: 1px solid var(--steel);
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.agent-runtime-summary p {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+}
+
+.agent-runtime-summary strong {
+  flex: none;
+  color: var(--fog-soft);
+  font-size: 9px;
+}
+
+.agent-runtime-summary p > span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-model-note {
+  margin: 6px 0 0 36px;
   color: var(--muted-dim);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 7px;
+  line-height: 1.45;
+}
+
+.agent-runtime-empty,
+.agent-empty-state {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.agent-empty-state {
+  color: var(--warning);
+}
+
+.agent-install-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  color: #f1c58c;
+  background: rgb(216 162 94 / 8%);
+  border: 1px solid rgb(216 162 94 / 23%);
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.agent-install-hint strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--fog-soft);
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-size: 9px;
+}
+
+.agent-install-hint p {
+  margin: 0;
+}
+
+.agent-install-hint button {
+  flex: 0 0 auto;
+  min-height: 29px;
+  padding: 5px 9px;
+  color: var(--fog);
+  background: var(--bulkhead-raised);
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--steel));
+  border-radius: 5px;
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.agent-install-hint button:not(:disabled):hover {
+  border-color: var(--warning);
 }
 
 .agent-yolo-row {
@@ -1470,6 +1306,7 @@ button:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+  margin-top: 10px;
   padding: 9px 11px;
   background: var(--deck);
   border: 1px solid var(--steel-soft);
@@ -1489,7 +1326,7 @@ button:focus-visible,
 }
 
 .agent-yolo-warning {
-  margin: -10px 0 0;
+  margin: 8px 0 0;
   padding: 8px 10px;
   color: #f1c58c;
   background: rgb(216 162 94 / 8%);
@@ -1501,7 +1338,7 @@ button:focus-visible,
 }
 
 .agent-permission-note {
-  margin: 0;
+  margin: 10px 0 0;
   padding: 10px 11px;
   color: var(--muted);
   background: var(--deck);
@@ -1512,10 +1349,19 @@ button:focus-visible,
 }
 
 .agent-dialog-actions {
+  position: sticky;
+  bottom: -18px;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 1px;
+  margin: 0 -18px -18px;
+  padding: 12px 18px 18px;
+  background: linear-gradient(
+    180deg,
+    rgb(30 41 57 / 0%),
+    var(--bulkhead-raised) 28%
+  );
 }
 
 .agent-cancel-button,
@@ -2021,19 +1867,16 @@ button:focus-visible,
   }
 
   .new-agent-dialog {
-    width: calc(100vw - 32px);
+    width: min(720px, calc(100vw - 32px));
   }
 
   .new-agent-dialog .modal-body {
     padding-inline: 16px;
   }
 
-  .agent-catalog-layout {
-    grid-template-columns: 182px minmax(0, 1fr);
-  }
-
-  .agent-config-panel {
-    padding: 15px 16px;
+  .agent-dialog-actions {
+    margin-inline: -16px;
+    padding-inline: 16px;
   }
 
   .runtime-row {

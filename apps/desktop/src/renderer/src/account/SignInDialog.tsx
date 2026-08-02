@@ -64,7 +64,7 @@ export function SignInDialog({
             <strong>
               {busy ? "Opening sign-in…" : "Continue with Google"}
             </strong>
-            <small>Opens in a secure CODRA window</small>
+            <small>Opens in your default browser</small>
           </span>
           <span className="provider-arrow" aria-hidden="true">
             →
@@ -95,7 +95,7 @@ export function SignInDialog({
         </p>
       ) : null}
       <p className="dialog-footnote">
-        CODRA never receives your Google password. The sign-in window returns an
+        CODRA never receives your Google password. The browser returns an
         authenticated Firebase session to this desktop app.
       </p>
     </ModalDialog>
