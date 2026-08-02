@@ -19,6 +19,7 @@ export default function App() {
     terminals,
     activeTerminalId,
     activeTerminal,
+    defaultCwd,
     createTerminal,
     createAgent,
     setupAgent,
@@ -113,11 +114,14 @@ export default function App() {
     }
   }
 
-  async function startAgent(request: AgentLaunchRequest): Promise<void> {
+  async function startAgent(
+    request: AgentLaunchRequest,
+    cwd: string,
+  ): Promise<void> {
     setAgentStarting(true);
     setAgentError(undefined);
     try {
-      await createAgent(request);
+      await createAgent(request, cwd);
       setAgentDialogOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -306,12 +310,13 @@ export default function App() {
       <NewAgentDialog
         open={agentDialogOpen}
         agents={agentRuntimes}
+        initialCwd={activeTerminal?.cwd ?? defaultCwd}
         busy={agentStarting}
         error={agentError ?? agentDiscoveryError}
         onClose={() => {
           if (!agentStarting) setAgentDialogOpen(false);
         }}
-        onStart={(request) => void startAgent(request)}
+        onStart={(request, cwd) => void startAgent(request, cwd)}
         onOpenAgentSettings={() => openSettings("agents")}
       />
       <SettingsDialog

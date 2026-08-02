@@ -10,6 +10,7 @@ import {
   RemoteHostStatusSchema,
   ResizeTerminalRequestSchema,
   TerminalDescriptorSchema,
+  TerminalCwdSchema,
   TerminalIdSchema,
   TerminalOutputChunkSchema,
   WriteTerminalRequestSchema,
@@ -50,6 +51,11 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
       },
     },
     terminal: {
+      async defaultCwd() {
+        return TerminalCwdSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.terminalDefaultCwd),
+        );
+      },
       async list() {
         return TerminalDescriptorSchema.array().parse(
           await ipc.invoke(IPC_CHANNELS.terminalList),

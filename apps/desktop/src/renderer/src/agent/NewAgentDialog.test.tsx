@@ -100,6 +100,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
         onOpenAgentSettings={vi.fn()}
@@ -110,6 +111,9 @@ describe("NewAgentDialog", () => {
       name: "First prompt",
     });
     const model = screen.getByRole("combobox", { name: "Model" });
+    expect(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    ).toHaveValue("/workspace/codra");
     await vi.waitFor(() => expect(prompt).toHaveFocus());
     expect(prompt).toBeRequired();
     expect(
@@ -124,6 +128,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
         onOpenAgentSettings={onOpenAgentSettings}
@@ -145,6 +150,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
       />,
@@ -161,19 +167,27 @@ describe("NewAgentDialog", () => {
       "high",
     );
     await userEvent.click(screen.getByRole("switch", { name: "YOLO mode" }));
+    const workingDirectory = screen.getByRole("textbox", {
+      name: "Working directory",
+    });
+    await userEvent.clear(workingDirectory);
+    await userEvent.type(workingDirectory, "/workspace/auth");
     await userEvent.type(
       screen.getByRole("textbox", { name: "First prompt" }),
       "  Fix the auth callback  ",
     );
     await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
 
-    expect(onStart).toHaveBeenCalledWith({
-      kind: "claude",
-      yolo: true,
-      model: "sonnet",
-      effort: "high",
-      prompt: "Fix the auth callback",
-    });
+    expect(onStart).toHaveBeenCalledWith(
+      {
+        kind: "claude",
+        yolo: true,
+        model: "sonnet",
+        effort: "high",
+        prompt: "Fix the auth callback",
+      },
+      "/workspace/auth",
+    );
   });
 
   it("uses a searchable vertical catalog and exposes unavailable runtime guidance", async () => {
@@ -181,6 +195,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
       />,
@@ -205,6 +220,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents.map((agent) => ({ ...agent, available: false }))}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
       />,
@@ -219,6 +235,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
       />,
@@ -240,13 +257,16 @@ describe("NewAgentDialog", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
 
-    expect(onStart).toHaveBeenCalledWith({
-      kind: "ollama",
-      yolo: false,
-      model: "qwen3-coder:latest",
-      effort: "high",
-      prompt: "Review this workspace",
-    });
+    expect(onStart).toHaveBeenCalledWith(
+      {
+        kind: "ollama",
+        yolo: false,
+        model: "qwen3-coder:latest",
+        effort: "high",
+        prompt: "Review this workspace",
+      },
+      "/workspace/codra",
+    );
   });
 
   it("allows a custom model for providers whose catalog may change", async () => {
@@ -255,6 +275,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
       />,
@@ -274,12 +295,15 @@ describe("NewAgentDialog", () => {
     );
     await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
 
-    expect(onStart).toHaveBeenCalledWith({
-      kind: "codex",
-      yolo: false,
-      model: "future-codex-model",
-      prompt: "Inspect this repository",
-    });
+    expect(onStart).toHaveBeenCalledWith(
+      {
+        kind: "codex",
+        yolo: false,
+        model: "future-codex-model",
+        prompt: "Inspect this repository",
+      },
+      "/workspace/codra",
+    );
   });
 
   it("hides effort when the selected provider has no supported mapping", async () => {
@@ -289,6 +313,7 @@ describe("NewAgentDialog", () => {
         agents={agents.map((agent) =>
           agent.kind === "gemini" ? { ...agent, available: true } : agent,
         )}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
       />,
@@ -303,6 +328,7 @@ describe("NewAgentDialog", () => {
       <NewAgentDialog
         open
         agents={agents}
+        initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
       />,
@@ -314,5 +340,10 @@ describe("NewAgentDialog", () => {
       "Inspect this repository",
     );
     expect(screen.getByRole("button", { name: "Start agent" })).toBeEnabled();
+
+    await userEvent.clear(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    );
+    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
   });
 });

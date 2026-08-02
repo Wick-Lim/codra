@@ -9,10 +9,11 @@ import { ModalDialog } from "../components/ModalDialog";
 export interface NewAgentDialogProps {
   open: boolean;
   agents: readonly AgentRuntime[];
+  initialCwd: string;
   busy?: boolean;
   error?: string;
   onClose(): void;
-  onStart(request: AgentLaunchRequest): void;
+  onStart(request: AgentLaunchRequest, cwd: string): void;
   onOpenAgentSettings?(): void;
 }
 
@@ -40,6 +41,7 @@ function initialModel(runtime: AgentRuntime): string {
 export function NewAgentDialog({
   open,
   agents,
+  initialCwd,
   busy = false,
   error,
   onClose,
@@ -53,6 +55,7 @@ export function NewAgentDialog({
   const [effortChoices, setEffortChoices] = React.useState<RuntimeValues>({});
   const [yolo, setYolo] = React.useState(false);
   const [prompt, setPrompt] = React.useState("");
+  const [workingDirectory, setWorkingDirectory] = React.useState(initialCwd);
   const promptRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
@@ -64,7 +67,8 @@ export function NewAgentDialog({
     setEffortChoices({});
     setYolo(false);
     setPrompt("");
-  }, [open]);
+    setWorkingDirectory(initialCwd);
+  }, [initialCwd, open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -118,12 +122,13 @@ export function NewAgentDialog({
     ? configuredEffort
     : "";
   const firstPrompt = prompt.trim();
+  const cwd = workingDirectory.trim();
   const modelIsValid = Boolean(
     selectedRuntime &&
     (!selectedRuntime.modelRequired || selectedModel.length > 0),
   );
   const canStart = Boolean(
-    selectedRuntime?.available && firstPrompt && modelIsValid && !busy,
+    selectedRuntime?.available && firstPrompt && cwd && modelIsValid && !busy,
   );
 
   function selectRuntime(kind: AgentKind): void {
@@ -144,13 +149,16 @@ export function NewAgentDialog({
         onSubmit={(event) => {
           event.preventDefault();
           if (!selectedRuntime || !firstPrompt || !canStart) return;
-          onStart({
-            kind: selectedRuntime.kind,
-            yolo: selectedRuntime.supportsYolo ? yolo : false,
-            ...(selectedModel ? { model: selectedModel } : {}),
-            ...(selectedEffort ? { effort: selectedEffort } : {}),
-            prompt: firstPrompt,
-          });
+          onStart(
+            {
+              kind: selectedRuntime.kind,
+              yolo: selectedRuntime.supportsYolo ? yolo : false,
+              ...(selectedModel ? { model: selectedModel } : {}),
+              ...(selectedEffort ? { effort: selectedEffort } : {}),
+              prompt: firstPrompt,
+            },
+            cwd,
+          );
         }}
       >
         <div className="agent-catalog-layout">
@@ -257,6 +265,28 @@ export function NewAgentDialog({
                     onChange={(event) => setPrompt(event.currentTarget.value)}
                   />
                   <small>{prompt.length.toLocaleString()} / 16,000</small>
+                </label>
+
+                <label className="agent-workdir-field">
+                  <span>Working directory</span>
+                  <span className="agent-workdir-control">
+                    <span className="agent-workdir-prompt" aria-hidden="true">
+                      ▸
+                    </span>
+                    <input
+                      required
+                      aria-label="Working directory"
+                      value={workingDirectory}
+                      maxLength={4096}
+                      disabled={busy}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="/path/to/workspace"
+                      onChange={(event) =>
+                        setWorkingDirectory(event.currentTarget.value)
+                      }
+                    />
+                  </span>
                 </label>
 
                 {!selectedRuntime.available ? (

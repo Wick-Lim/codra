@@ -33,6 +33,7 @@ function createDesktopApiFake() {
       setup: vi.fn(),
     },
     terminal: {
+      defaultCwd: vi.fn().mockResolvedValue("/Users/codra"),
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       write: vi.fn().mockResolvedValue(undefined),
@@ -70,6 +71,17 @@ function createDesktopApiFake() {
 }
 
 describe("useTerminals", () => {
+  it("loads the host default working directory for a first agent", async () => {
+    const fake = createDesktopApiFake();
+
+    const { result } = renderHook(() => useTerminals(fake.api));
+
+    await waitFor(() => {
+      expect(result.current.defaultCwd).toBe("/Users/codra");
+    });
+    expect(fake.api.terminal.defaultCwd).toHaveBeenCalledOnce();
+  });
+
   it("keeps descriptor events received during the initial load without subscribing to output", async () => {
     const fake = createDesktopApiFake();
     let finishList: ((terminals: TerminalDescriptor[]) => void) | undefined;
@@ -144,16 +156,20 @@ describe("useTerminals", () => {
     const { result } = renderHook(() => useTerminals(fake.api));
 
     await act(async () => {
-      await result.current.createAgent({
-        kind: "codex",
-        yolo: true,
-        prompt: "Fix the failing tests",
-      });
+      await result.current.createAgent(
+        {
+          kind: "codex",
+          yolo: true,
+          prompt: "Fix the failing tests",
+        },
+        "/workspace/services/api",
+      );
     });
 
     expect(fake.api.terminal.create).toHaveBeenCalledWith({
       cols: 100,
       rows: 30,
+      cwd: "/workspace/services/api",
       agent: {
         kind: "codex",
         yolo: true,

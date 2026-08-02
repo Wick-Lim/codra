@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const TerminalIdSchema = z.string().uuid();
+export const TerminalCwdSchema = z.string().min(1).max(4096);
 export const TerminalSizeSchema = z.object({
   cols: z.number().int().min(20).max(400),
   rows: z.number().int().min(5).max(200),
@@ -98,7 +99,7 @@ export const AgentRuntimeSchema = z
   })
   .strict();
 export const CreateTerminalRequestSchema = TerminalSizeSchema.extend({
-  cwd: z.string().min(1).max(4096).optional(),
+  cwd: TerminalCwdSchema.optional(),
   agent: AgentLaunchRequestSchema.optional(),
   agentSetup: AgentSetupRequestSchema.optional(),
 }).superRefine((request, context) => {
@@ -176,7 +177,7 @@ export const TerminalDescriptorSchema: z.ZodType<TerminalDescriptor> = z.object(
   {
     id: TerminalIdSchema,
     title: z.string().min(1).max(200),
-    cwd: z.string().min(1).max(4096),
+    cwd: TerminalCwdSchema,
     cols: z.number().int().min(20).max(400),
     rows: z.number().int().min(5).max(200),
     state: z.enum(["running", "exited"]),

@@ -7,6 +7,7 @@ import {
   ReplayTerminalRequestSchema,
   ResizeTerminalRequestSchema,
   TerminalIdSchema,
+  TerminalCwdSchema,
   WriteTerminalRequestSchema,
   type CreateTerminalRequest,
   type AgentKind,
@@ -17,6 +18,7 @@ import {
   type TerminalOutputChunk,
   type WriteTerminalRequest,
 } from "@codra/protocol";
+import { homedir } from "node:os";
 import { listAgentRuntimes } from "../terminal/agent-runtime";
 import {
   TerminalAdmissionGate,
@@ -54,6 +56,7 @@ export interface RegisterTerminalIpcOptions {
   isTrustedRendererUrl(url: string): boolean;
   admission?: TerminalRequestAdmission;
   listAgents?(): AgentRuntime[] | Promise<AgentRuntime[]>;
+  defaultCwd?(): string;
   openExternal?(url: string): Promise<void>;
   reportError?(error: unknown): void;
 }
@@ -63,6 +66,7 @@ const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download/mac";
 const requestChannels = [
   IPC_CHANNELS.agentList,
   IPC_CHANNELS.agentSetup,
+  IPC_CHANNELS.terminalDefaultCwd,
   IPC_CHANNELS.terminalList,
   IPC_CHANNELS.terminalCreate,
   IPC_CHANNELS.terminalWrite,
@@ -103,6 +107,7 @@ export function registerTerminalIpc({
   isTrustedRendererUrl,
   admission = new TerminalAdmissionGate(),
   listAgents = listAgentRuntimes,
+  defaultCwd = homedir,
   openExternal = async () => {
     throw new Error("AGENT_EXTERNAL_SETUP_UNAVAILABLE");
   },
@@ -113,6 +118,13 @@ export function registerTerminalIpc({
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   };
   const registrations: readonly [string, IpcHandler][] = [
+    [
+      IPC_CHANNELS.terminalDefaultCwd,
+      (event) => {
+        authorize(event);
+        return TerminalCwdSchema.parse(defaultCwd());
+      },
+    ],
     [
       IPC_CHANNELS.agentList,
       async (event) => {

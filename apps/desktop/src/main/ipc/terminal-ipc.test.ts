@@ -130,6 +130,7 @@ function createIpcHarness() {
     },
   ];
   const listAgents = vi.fn(() => agents);
+  const defaultCwd = vi.fn(() => "/Users/codra");
   const openExternal = vi.fn(async () => undefined);
   const unregister = registerTerminalIpc({
     ipc,
@@ -137,6 +138,7 @@ function createIpcHarness() {
     windows: () => windows,
     isTrustedRendererUrl: (url) => url === trustedRendererUrl,
     listAgents,
+    defaultCwd,
     openExternal,
   });
 
@@ -148,6 +150,7 @@ function createIpcHarness() {
   return {
     manager,
     listAgents,
+    defaultCwd,
     openExternal,
     windows,
     ipc,
@@ -175,6 +178,15 @@ function createIpcHarness() {
 }
 
 describe("registerTerminalIpc", () => {
+  it("returns the host working directory to a trusted renderer", async () => {
+    const harness = createIpcHarness();
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalDefaultCwd),
+    ).resolves.toBe("/Users/codra");
+    expect(harness.defaultCwd).toHaveBeenCalledOnce();
+  });
+
   it("returns validated local agent availability to a trusted renderer", async () => {
     const harness = createIpcHarness();
 
@@ -439,6 +451,9 @@ describe("registerTerminalIpc", () => {
 
     expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
       IPC_CHANNELS.agentSetup,
+    );
+    expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
+      IPC_CHANNELS.terminalDefaultCwd,
     );
     expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
       IPC_CHANNELS.terminalList,

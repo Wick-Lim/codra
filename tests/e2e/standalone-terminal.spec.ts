@@ -184,3 +184,54 @@ test("keeps the secured CODRA renderer when navigation or a new window is reques
     }
   }
 });
+
+test("keeps agent workdir and launch actions visible in a compact window", async () => {
+  const userDataDir = await mkdtemp(path.join(tmpdir(), "codra-agent-ui-e2e-"));
+  let electronApp: Awaited<ReturnType<typeof electron.launch>> | undefined;
+  let electronPid: number | undefined;
+  const knownDescendantPids = new Set<number>();
+
+  try {
+    electronApp = await electron.launch({
+      args: [desktopMainEntry],
+      env: {
+        ...process.env,
+        CODRA_USER_DATA_DIR: userDataDir,
+      },
+    });
+    electronPid = electronApp.process().pid!;
+    const page = await electronApp.firstWindow();
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(900, 720);
+    });
+    await expect
+      .poll(() => page.evaluate(() => window.innerHeight))
+      .toBeLessThanOrEqual(720);
+
+    await page.getByRole("button", { name: "New agent" }).click();
+
+    const workdir = page.getByRole("textbox", { name: "Working directory" });
+    await expect(workdir).toBeVisible();
+    await expect(workdir).not.toHaveValue("");
+    await expect(
+      page.getByRole("textbox", { name: "First prompt" }),
+    ).toBeFocused();
+    const startButton = page.getByRole("button", { name: "Start agent" });
+    const startBox = await startButton.boundingBox();
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    expect(startBox).not.toBeNull();
+    expect(startBox!.y + startBox!.height).toBeLessThanOrEqual(viewportHeight);
+
+    await electronApp.close();
+    await expect.poll(() => processExists(electronPid!)).toBe(false);
+  } finally {
+    try {
+      await terminateCapturedProcessTree({
+        rootPid: electronPid,
+        knownDescendantPids,
+      });
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  }
+});

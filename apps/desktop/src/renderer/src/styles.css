@@ -943,21 +943,29 @@ button:focus-visible,
   padding: 16px 20px 14px;
 }
 
+.new-agent-dialog .modal-surface {
+  overflow: hidden;
+}
+
 .new-agent-dialog .modal-body {
+  height: calc(100vh - 168px);
   max-height: calc(100vh - 168px);
   padding-block: 16px 18px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .agent-launch-form {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
+  height: 100%;
+  min-height: 0;
 }
 
 .agent-catalog-layout {
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
-  min-height: 420px;
+  min-height: 0;
   overflow: hidden;
   background: var(--obsidian);
   border: 1px solid var(--steel-soft);
@@ -967,6 +975,7 @@ button:focus-visible,
 .agent-catalog-panel {
   min-width: 0;
   padding: 12px;
+  overflow: auto;
   background:
     linear-gradient(180deg, rgb(145 167 255 / 4%), transparent 140px),
     var(--bulkhead);
@@ -1028,7 +1037,8 @@ button:focus-visible,
 }
 
 .agent-picker legend,
-.agent-prompt-field > span {
+.agent-prompt-field > span,
+.agent-workdir-field > span:first-child {
   margin-bottom: 8px;
   color: var(--muted);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -1159,6 +1169,8 @@ button:focus-visible,
 .agent-config-panel {
   min-width: 0;
   padding: 18px 20px;
+  overflow: auto;
+  scrollbar-color: var(--steel) transparent;
 }
 
 .agent-config-header,
@@ -1342,7 +1354,49 @@ button:focus-visible,
 
 .agent-prompt-field {
   display: grid;
+  margin-bottom: 10px;
+}
+
+.agent-workdir-field {
+  display: grid;
+  gap: 7px;
   margin-bottom: 15px;
+}
+
+.agent-workdir-control {
+  position: relative;
+  display: block;
+}
+
+.agent-workdir-prompt {
+  position: absolute;
+  top: 50%;
+  left: 11px;
+  color: var(--signal);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.agent-workdir-control input {
+  width: 100%;
+  height: 34px;
+  padding: 6px 10px 6px 28px;
+  overflow: hidden;
+  color: var(--fog-soft);
+  caret-color: var(--signal);
+  background: var(--deck);
+  border: 1px solid var(--steel);
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+}
+
+.agent-workdir-control input:focus {
+  border-color: var(--signal);
+  outline: 2px solid rgb(145 167 255 / 13%);
 }
 
 .agent-prompt-field textarea {

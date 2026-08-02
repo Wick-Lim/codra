@@ -69,6 +69,7 @@ export const IPC_CHANNELS = {
   agentList: "codra:agent:list",
   agentSetup: "codra:agent:setup",
   terminalList: "codra:terminal:list",
+  terminalDefaultCwd: "codra:terminal:default-cwd",
   terminalCreate: "codra:terminal:create",
   terminalWrite: "codra:terminal:write",
   terminalResize: "codra:terminal:resize",
@@ -103,6 +104,7 @@ export interface CodraDesktopApi {
     setup(request: AgentSetupRequest): Promise<AgentSetupResult>;
   };
   terminal: {
+    defaultCwd(): Promise<string>;
     list(): Promise<TerminalDescriptor[]>;
     create(request: CreateTerminalRequest): Promise<TerminalDescriptor>;
     write(request: WriteTerminalRequest): Promise<void>;

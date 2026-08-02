@@ -111,6 +111,7 @@ describe("createDesktopApi", () => {
   it("routes every terminal invocation through its frozen channel", async () => {
     const ipc = new FakeIpcRenderer(
       new Map<string, unknown>([
+        [IPC_CHANNELS.terminalDefaultCwd, "/Users/codra"],
         [IPC_CHANNELS.terminalList, [descriptor]],
         [IPC_CHANNELS.terminalCreate, descriptor],
         [IPC_CHANNELS.terminalReplay, []],
@@ -118,6 +119,7 @@ describe("createDesktopApi", () => {
     );
     const api = createDesktopApi(ipc);
 
+    await expect(api.terminal.defaultCwd()).resolves.toBe("/Users/codra");
     await api.terminal.list();
     await api.terminal.create({ cols: 120, rows: 32 });
     await api.terminal.write({ terminalId, data: "pwd\n" });
@@ -126,6 +128,7 @@ describe("createDesktopApi", () => {
     await api.terminal.close(terminalId);
 
     expect(ipc.invocations).toEqual([
+      { channel: IPC_CHANNELS.terminalDefaultCwd, args: [] },
       { channel: IPC_CHANNELS.terminalList, args: [] },
       {
         channel: IPC_CHANNELS.terminalCreate,

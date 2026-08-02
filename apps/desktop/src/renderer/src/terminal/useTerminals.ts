@@ -11,8 +11,9 @@ export interface UseTerminalsResult {
   terminals: TerminalDescriptor[];
   activeTerminalId: string | null;
   activeTerminal: TerminalDescriptor | null;
+  defaultCwd: string;
   createTerminal(): Promise<void>;
-  createAgent(request: AgentLaunchRequest): Promise<void>;
+  createAgent(request: AgentLaunchRequest, cwd: string): Promise<void>;
   setupAgent(request: AgentSetupRequest): Promise<AgentSetupResult>;
   selectTerminal(terminalId: string): void;
   closeTerminal(terminalId: string): Promise<void>;
@@ -37,6 +38,7 @@ export function useTerminals(
 ): UseTerminalsResult {
   const [terminals, setTerminals] = useState<TerminalDescriptor[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
+  const [defaultCwd, setDefaultCwd] = useState("");
   const dismissedTerminalIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -50,6 +52,13 @@ export function useTerminals(
       if (initialLoadPending) changedDuringLoad.set(descriptor.id, descriptor);
       setTerminals((current) => replaceDescriptor(current, descriptor));
     });
+
+    void api.terminal
+      .defaultCwd()
+      .then((cwd) => {
+        if (mounted) setDefaultCwd(cwd);
+      })
+      .catch(() => undefined);
 
     void api.terminal.list().then((listed) => {
       if (!mounted) return;
@@ -98,10 +107,11 @@ export function useTerminals(
   }, [api]);
 
   const createAgent = useCallback(
-    async (agent: AgentLaunchRequest) => {
+    async (agent: AgentLaunchRequest, cwd: string) => {
       const descriptor = await api.terminal.create({
         cols: 100,
         rows: 30,
+        cwd,
         agent,
       });
       setTerminals((current) => replaceDescriptor(current, descriptor));
@@ -147,6 +157,7 @@ export function useTerminals(
     terminals,
     activeTerminalId,
     activeTerminal,
+    defaultCwd,
     createTerminal,
     createAgent,
     setupAgent,

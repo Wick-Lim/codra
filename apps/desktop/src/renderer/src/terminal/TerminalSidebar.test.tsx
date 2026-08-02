@@ -162,6 +162,7 @@ function createPaneApi(
       ]),
     },
     terminal: {
+      defaultCwd: vi.fn().mockResolvedValue("/Users/codra"),
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       write: vi.fn().mockResolvedValue(undefined),
@@ -899,6 +900,9 @@ describe("App terminal workspace", () => {
     expect(
       await screen.findByRole("dialog", { name: "New agent" }),
     ).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    ).toHaveValue("/Users/codra");
     await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
@@ -915,6 +919,7 @@ describe("App terminal workspace", () => {
       expect(api.terminal.create).toHaveBeenCalledWith({
         cols: 100,
         rows: 30,
+        cwd: "/Users/codra",
         agent: {
           kind: "gemini",
           yolo: true,
