@@ -12,6 +12,7 @@ import {
 import {
   bootstrapProductionDesktopLogin,
   createDesktopLoginCallbackListener,
+  createDesktopLoginDeviceSignaturePayload,
   createDesktopLoginGoogleAuthExchangeRequest,
   createDesktopLoginGoogleAuthUriRequest,
   DESKTOP_LOGIN_CALLBACK_PORT,
@@ -115,6 +116,28 @@ describe("desktop login loopback", () => {
         sessionId: state,
         context: state,
       },
+    });
+  });
+
+  it("builds a redeem signature payload without transport-only fields", () => {
+    const nonce = createPkceVerifier(new Uint8Array(32).fill(3));
+    expect(
+      createDesktopLoginDeviceSignaturePayload({
+        attemptId,
+        code,
+        state,
+        nonce,
+        deviceId: attemptId,
+        keyThumbprint: state,
+      }),
+    ).toEqual({
+      domain: "codra.desktop-login.redeem.v1",
+      attemptId,
+      code,
+      state,
+      nonce,
+      deviceId: attemptId,
+      keyThumbprint: state,
     });
   });
 

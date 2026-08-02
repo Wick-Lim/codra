@@ -73,6 +73,17 @@ export interface DesktopLoginGoogleAuthExchangeRequest {
   returnIdpCredential: true;
 }
 
+export function createDesktopLoginDeviceSignaturePayload(input: {
+  attemptId: string;
+  code: string;
+  state: string;
+  nonce: string;
+  deviceId: string;
+  keyThumbprint: string;
+}) {
+  return buildDesktopLoginRedeemSigningPayload(input);
+}
+
 export interface DesktopLoginCallbackListener {
   port: number;
   waitForCallback(): Promise<DesktopLoginCallback>;
@@ -598,8 +609,11 @@ export async function bootstrapProductionDesktopLogin(
     };
     const deviceSignature = await signCanonicalPayload(
       options.identity.privateKey,
-      buildDesktopLoginRedeemSigningPayload({
-        ...unsignedRedeem,
+      createDesktopLoginDeviceSignaturePayload({
+        attemptId: callback.attemptId,
+        code: authorization.code,
+        state: authorization.state,
+        nonce,
         deviceId: options.identity.deviceId,
         keyThumbprint: options.identity.keyThumbprint,
       }),
