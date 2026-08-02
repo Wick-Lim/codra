@@ -88,8 +88,7 @@ The renderer consumes typed, privileged APIs and never imports Firebase, WebRTC,
 
 ```ts
 type AgentExecutionTarget =
-  | { kind: "local" }
-  | { kind: "remote"; deviceId: string; displayName: string };
+  { kind: "local" } | { kind: "remote"; deviceId: string; displayName: string };
 
 type AgentWorkspace = {
   target: AgentExecutionTarget;
