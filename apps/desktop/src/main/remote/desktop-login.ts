@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { hostname } from "node:os";
 import {
   createServer,
   type IncomingMessage,
@@ -24,6 +25,7 @@ import {
   type DesktopLoginAction,
   type RemoteDevice,
 } from "@codra/protocol";
+import { resolveDeviceDisplayName } from "./device-name";
 import type { HostIdentity } from "./host-identity";
 
 const CALLBACK_PATH = "/auth/callback" as const;
@@ -730,7 +732,7 @@ export async function bootstrapProductionDesktopLogin(
       attemptId,
       action: options.action,
       deviceId: options.identity.deviceId,
-      displayName: "CODRA host",
+      displayName: resolveDeviceDisplayName(hostname()),
       publicKeyJwk: options.identity.publicKeyJwk,
       keyThumbprint: options.identity.keyThumbprint,
       pkceChallenge: createPkceChallenge(verifier),

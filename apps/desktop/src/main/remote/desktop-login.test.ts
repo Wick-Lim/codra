@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
+import { hostname } from "node:os";
 import { type IncomingHttpHeaders, request as httpRequest } from "node:http";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +22,7 @@ import {
   parseDesktopLoginCallback,
   shouldRetryDesktopLoginAsRegister,
 } from "./desktop-login";
+import { resolveDeviceDisplayName } from "./device-name";
 import type { HostIdentity } from "./host-identity";
 
 const attemptId = "d9c3a142-3f0e-4ab2-867d-8112f0e5c162";
@@ -599,6 +601,32 @@ describe("desktop login loopback", () => {
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginStart",
       "https://asia-northeast3-codra-1b3bb.cloudfunctions.net/desktopLoginCancel",
     ]);
+  });
+
+  it("registers the device under the resolved host display name", async () => {
+    const runtime = productionRuntime();
+    let startBody: { displayName?: unknown } | undefined;
+    const fetch = vi.fn(async (url: string, init: RequestInit) => {
+      if (url.endsWith("desktopLoginStart")) {
+        startBody = JSON.parse(String(init.body)) as { displayName?: unknown };
+        return new Promise<Response>(() => undefined);
+      }
+      return new Response(JSON.stringify({ cancelled: true }), { status: 200 });
+    });
+
+    await expect(
+      bootstrapProductionDesktopLogin(
+        runtime,
+        { identity: hostIdentity(), action: "register" },
+        {
+          fetch,
+          openExternal: async () => undefined,
+          timeoutMs: 25,
+        },
+      ),
+    ).rejects.toThrow("DESKTOP_LOGIN_TIMEOUT");
+    expect(startBody?.displayName).toBe(resolveDeviceDisplayName(hostname()));
+    expect(startBody?.displayName).not.toBe("CODRA host");
   });
 
   it("has no embedded browser or Firebase web redirect implementation", async () => {

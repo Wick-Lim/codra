@@ -122,8 +122,9 @@ async function startPrimaryInstance(): Promise<void> {
           detail: `요청 장치 ${session.clientDeviceId.slice(0, 8)}…\n권한: ${session.requestedScopes.join(", ")}`,
         })
         .then((result) => {
-          if (result.response === 1) return remoteHost.approveSession(session);
-          return remoteHost.rejectSession(session);
+          if (result.response === 1)
+            return remoteHost.signSessionApproval(session);
+          return remoteHost.signSessionRejection(session);
         })
         .catch((error) => console.error("Remote approval failed", error));
     },

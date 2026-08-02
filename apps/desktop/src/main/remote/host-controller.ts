@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { httpsCallable } from "firebase/functions";
 import type { FirebaseRuntime } from "@codra/firebase";
 import {
@@ -11,6 +12,9 @@ import {
   RemoteDeviceSchema,
   signCanonicalPayload,
   type AgentExecutionTarget,
+  type ApproveRemoteSessionRequest,
+  type PendingRemoteSession,
+  type RejectRemoteSessionRequest,
   type AgentLaunchTarget,
   type AgentRuntime,
   type RemoteAccountStatus,
@@ -46,6 +50,8 @@ import {
   RemoteAgentClient,
   type RemoteAgentChannelClient,
 } from "./remote-agent-client";
+import { resolveDeviceDisplayName } from "./device-name";
+import { SessionApprovalRegistry } from "./session-approval";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -57,6 +63,7 @@ export interface RemoteHostControllerOptions {
     peerName: string,
     iceServers: readonly IceServerInput[],
   ): PeerConnectionPort;
+  ensureWindow?(): Promise<void>;
 }
 
 export class RemoteHostController {
@@ -66,6 +73,7 @@ export class RemoteHostController {
   private connector: DesktopPeerConnector | undefined;
   private hostServices: RemoteHostServices | undefined;
   private readonly remoteClient: RemoteAgentClient;
+  private readonly sessionApprovals: SessionApprovalRegistry;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private startPromise: Promise<void> | undefined;
   private authPromise: Promise<void> | undefined;
@@ -102,6 +110,47 @@ export class RemoteHostController {
         );
       },
     });
+    this.sessionApprovals = new SessionApprovalRegistry({
+      approve: async (session, approvedScopes) => {
+        await this.signSessionApproval(session, [...approvedScopes]);
+      },
+      reject: async (session) => {
+        await this.signSessionRejection(session);
+      },
+      resolveRequesterName: (session) => this.resolveRequesterName(session),
+      ensureWindow: async () => {
+        await this.options.ensureWindow?.();
+      },
+      now: () => Date.now(),
+      reportError: (error) => this.options.reportError(error),
+    });
+  }
+
+  getPendingSessions(): PendingRemoteSession[] {
+    return this.sessionApprovals.list();
+  }
+
+  approveSession(request: ApproveRemoteSessionRequest): Promise<void> {
+    return this.sessionApprovals.approve(request);
+  }
+
+  rejectSession(request: RejectRemoteSessionRequest): Promise<void> {
+    return this.sessionApprovals.reject(request);
+  }
+
+  onPendingSessionsChanged(
+    listener: (sessions: PendingRemoteSession[]) => void,
+  ): () => void {
+    return this.sessionApprovals.onChanged(listener);
+  }
+
+  private async resolveRequesterName(
+    session: RemoteSession,
+  ): Promise<string | undefined> {
+    if (!this.deviceRuntime) return undefined;
+    const devices = await listFirebaseHostDevices(this.deviceRuntime.functions);
+    return devices.find((device) => device.deviceId === session.clientDeviceId)
+      ?.displayName;
   }
 
   configureHostServices(services: RemoteHostServices): void {
@@ -332,6 +381,7 @@ export class RemoteHostController {
     this.unsubscribePending?.();
     this.unsubscribePending = undefined;
     this.promptedSessions.clear();
+    this.sessionApprovals.clear();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
     if (this.deviceRuntime?.auth.currentUser)
@@ -380,7 +430,7 @@ export class RemoteHostController {
           action,
           deviceId: identity.deviceId,
           kind: "host",
-          displayName: "CODRA host",
+          displayName: resolveDeviceDisplayName(hostname()),
           publicKeyJwk: identity.publicKeyJwk,
           keyThumbprint: identity.keyThumbprint,
           capabilities: ["terminal", "webrtc", "turn-udp"],
@@ -422,6 +472,7 @@ export class RemoteHostController {
         generation: device.generation,
         onChange: (sessions) => {
           for (const session of sessions) {
+            this.sessionApprovals.handlePending(session);
             if (this.promptedSessions.has(session.sessionId)) continue;
             this.promptedSessions.add(session.sessionId);
             this.options.onPendingSession?.(session);
@@ -445,7 +496,7 @@ export class RemoteHostController {
     }
   }
 
-  async approveSession(
+  async signSessionApproval(
     session: RemoteSession,
     approvedScopes = session.requestedScopes,
   ): Promise<RemoteSession> {
@@ -489,7 +540,7 @@ export class RemoteHostController {
     return result;
   }
 
-  async rejectSession(
+  async signSessionRejection(
     session: RemoteSession,
     rejectionReason:
       "USER_REJECTED" | "HOST_BUSY" | "HOST_DISABLED" = "USER_REJECTED",
