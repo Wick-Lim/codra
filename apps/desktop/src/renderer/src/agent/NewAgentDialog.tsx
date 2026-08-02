@@ -13,6 +13,7 @@ export interface NewAgentDialogProps {
   error?: string;
   onClose(): void;
   onStart(request: AgentLaunchRequest): void;
+  onOpenAgentSettings?(): void;
 }
 
 const CUSTOM_MODEL = "__custom__";
@@ -43,6 +44,7 @@ export function NewAgentDialog({
   error,
   onClose,
   onStart,
+  onOpenAgentSettings = () => undefined,
 }: NewAgentDialogProps) {
   const [selectedKind, setSelectedKind] = React.useState<AgentKind>();
   const [query, setQuery] = React.useState("");
@@ -51,6 +53,7 @@ export function NewAgentDialog({
   const [effortChoices, setEffortChoices] = React.useState<RuntimeValues>({});
   const [yolo, setYolo] = React.useState(false);
   const [prompt, setPrompt] = React.useState("");
+  const promptRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -89,6 +92,9 @@ export function NewAgentDialog({
   const selectedRuntime = agents.find(
     (runtime) => runtime.kind === selectedKind,
   );
+  React.useEffect(() => {
+    if (open && selectedRuntime) promptRef.current?.focus();
+  }, [open, selectedRuntime]);
   const modelChoice = selectedRuntime
     ? (modelChoices[selectedRuntime.kind] ?? initialModel(selectedRuntime))
     : "";
@@ -129,7 +135,7 @@ export function NewAgentDialog({
     <ModalDialog
       open={open}
       title="New agent"
-      description="Choose a local runtime, model, and first task for a dedicated terminal session."
+      description="Start with the task. Tune the runtime only when this session needs it."
       className="new-agent-dialog"
       onClose={onClose}
     >
@@ -207,7 +213,7 @@ export function NewAgentDialog({
             ) : null}
           </aside>
 
-          <section className="agent-config-panel" aria-label="Agent setup">
+          <section className="agent-config-panel" aria-label="Agent launch">
             {selectedRuntime ? (
               <React.Fragment>
                 <header className="agent-config-header">
@@ -235,12 +241,43 @@ export function NewAgentDialog({
                 <p className="agent-description">
                   {selectedRuntime.description}
                 </p>
+
+                <label className="agent-prompt-field">
+                  <span>First prompt</span>
+                  <textarea
+                    ref={promptRef}
+                    autoFocus
+                    required
+                    aria-label="First prompt"
+                    value={prompt}
+                    maxLength={16_000}
+                    rows={7}
+                    disabled={busy}
+                    placeholder="Describe the first task for this agent…"
+                    onChange={(event) => setPrompt(event.currentTarget.value)}
+                  />
+                  <small>{prompt.length.toLocaleString()} / 16,000</small>
+                </label>
+
                 {!selectedRuntime.available ? (
-                  <p className="agent-install-hint">
-                    {selectedRuntime.installHint}
-                  </p>
+                  <div className="agent-install-hint">
+                    <div>
+                      <strong>Runtime setup is in Settings</strong>
+                      <p>{selectedRuntime.installHint}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onOpenAgentSettings}
+                      disabled={busy}
+                    >
+                      Open Agent settings
+                    </button>
+                  </div>
                 ) : null}
 
+                <p className="agent-run-configuration-label">
+                  Run configuration
+                </p>
                 <div
                   className="agent-model-stack"
                   data-has-effort={effortOptions.length > 0}
@@ -322,20 +359,6 @@ export function NewAgentDialog({
                       : "Use the provider default or pin a model for this session."}
                   </p>
                 </div>
-
-                <label className="agent-prompt-field">
-                  <span>First prompt</span>
-                  <textarea
-                    aria-label="First prompt"
-                    value={prompt}
-                    maxLength={16_000}
-                    rows={5}
-                    disabled={busy}
-                    placeholder="Describe the first task for this agent…"
-                    onChange={(event) => setPrompt(event.currentTarget.value)}
-                  />
-                  <small>{prompt.length.toLocaleString()} / 16,000</small>
-                </label>
 
                 {selectedRuntime.supportsYolo ? (
                   <React.Fragment>

@@ -85,10 +85,12 @@ function createPaneApi(
   replay: TerminalOutputChunk[] | Promise<TerminalOutputChunk[]> = [],
 ): CodraDesktopApi & {
   emitOutput(chunk: TerminalOutputChunk): void;
+  emitChanged(descriptor: TerminalDescriptor): void;
   readonly outputUnsubscribes: ReturnType<typeof vi.fn>[];
   activeOutputSubscriptions(): number;
 } {
   const outputListeners = new Set<(chunk: TerminalOutputChunk) => void>();
+  const changedListeners = new Set<(descriptor: TerminalDescriptor) => void>();
   const outputUnsubscribes: ReturnType<typeof vi.fn>[] = [];
   const api: CodraDesktopApi = {
     agents: {
@@ -174,7 +176,10 @@ function createPaneApi(
         outputUnsubscribes.push(unsubscribe);
         return unsubscribe;
       }),
-      onChanged: vi.fn(() => vi.fn()),
+      onChanged: vi.fn((listener) => {
+        changedListeners.add(listener);
+        return () => changedListeners.delete(listener);
+      }),
     },
     remote: {
       getState: vi.fn().mockResolvedValue({ state: "idle" }),
@@ -198,6 +203,9 @@ function createPaneApi(
   return Object.assign(api, {
     emitOutput(chunk: TerminalOutputChunk) {
       for (const listener of [...outputListeners]) listener(chunk);
+    },
+    emitChanged(descriptor: TerminalDescriptor) {
+      for (const listener of [...changedListeners]) listener(descriptor);
     },
     outputUnsubscribes,
     activeOutputSubscriptions() {
@@ -955,5 +963,62 @@ describe("App terminal workspace", () => {
     expect(remoteSwitch).not.toBeDisabled();
     await userEvent.click(remoteSwitch);
     expect(api.remote.activate).toHaveBeenCalledOnce();
+  });
+
+  it("routes missing runtimes from prompt-first launch into setup settings", async () => {
+    const api = createPaneApi();
+    const discovered = await api.agents.list();
+    vi.mocked(api.agents.list).mockResolvedValue(
+      discovered.map((runtime) =>
+        runtime.kind === "gemini" ? { ...runtime, available: false } : runtime,
+      ),
+    );
+    const setupTerminal = { ...runningTerminal, title: "Setup Gemini" };
+    vi.mocked(api.agents.setup).mockResolvedValue({
+      kind: "terminal",
+      terminal: setupTerminal,
+    });
+    Object.defineProperty(window, "codra", {
+      configurable: true,
+      value: api,
+    });
+
+    render(React.createElement(App));
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "New agent" }),
+    );
+    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open Agent settings" }),
+    );
+
+    expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Agent runtimes" }),
+    ).toHaveAttribute("aria-current", "page");
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Install and sign in to Gemini CLI",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.agents.setup).toHaveBeenCalledWith({
+        kind: "gemini",
+        action: "install",
+      }),
+    );
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Setup Gemini" })).toBeVisible();
+
+    const listCallsBeforeExit = vi.mocked(api.agents.list).mock.calls.length;
+    act(() => {
+      api.emitChanged({ ...setupTerminal, state: "exited", exitCode: 0 });
+    });
+    await waitFor(() =>
+      expect(api.agents.list).toHaveBeenCalledTimes(listCallsBeforeExit + 1),
+    );
   });
 });

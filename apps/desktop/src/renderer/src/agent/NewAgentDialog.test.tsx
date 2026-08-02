@@ -95,6 +95,50 @@ const agents: AgentRuntime[] = [
 ];
 
 describe("NewAgentDialog", () => {
+  it("opens prompt-first before optional run configuration", async () => {
+    render(
+      <NewAgentDialog
+        open
+        agents={agents}
+        onClose={vi.fn()}
+        onStart={vi.fn()}
+        onOpenAgentSettings={vi.fn()}
+      />,
+    );
+
+    const prompt = await screen.findByRole("textbox", {
+      name: "First prompt",
+    });
+    const model = screen.getByRole("combobox", { name: "Model" });
+    await vi.waitFor(() => expect(prompt).toHaveFocus());
+    expect(prompt).toBeRequired();
+    expect(
+      prompt.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("routes a missing runtime to settings without starting setup or an agent", async () => {
+    const onStart = vi.fn();
+    const onOpenAgentSettings = vi.fn();
+    render(
+      <NewAgentDialog
+        open
+        agents={agents}
+        onClose={vi.fn()}
+        onStart={onStart}
+        onOpenAgentSettings={onOpenAgentSettings}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open Agent settings" }),
+    );
+
+    expect(onOpenAgentSettings).toHaveBeenCalledOnce();
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
   it("submits the selected agent, YOLO choice, and trimmed first prompt", async () => {
     const onStart = vi.fn();
     render(

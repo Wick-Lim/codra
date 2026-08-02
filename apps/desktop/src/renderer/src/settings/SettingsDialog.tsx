@@ -1,16 +1,28 @@
-import type { RemoteAccountStatus, RemoteHostStatus } from "@codra/protocol";
+import type {
+  AgentKind,
+  AgentRuntime,
+  AgentSetupRequest,
+  RemoteAccountStatus,
+  RemoteHostStatus,
+} from "@codra/protocol";
 import React from "react";
 import { ModalDialog } from "../components/ModalDialog";
+import { AgentRuntimeSettings } from "./AgentRuntimeSettings";
 
 void React;
 
 export interface SettingsDialogProps {
   open: boolean;
+  initialSection?: "remote" | "agents";
+  runtimes?: readonly AgentRuntime[];
+  setupKind?: AgentKind;
+  agentError?: string;
   accountStatus: RemoteAccountStatus;
   remoteStatus: RemoteHostStatus;
   onClose(): void;
   onRemoteChange(enabled: boolean): void;
   onSignIn(): void;
+  onAgentSetup?(request: AgentSetupRequest): void;
 }
 
 function remoteStateCopy(status: RemoteHostStatus): {
@@ -45,12 +57,24 @@ function remoteStateCopy(status: RemoteHostStatus): {
 
 export function SettingsDialog({
   open,
+  initialSection = "remote",
+  runtimes = [],
+  setupKind,
+  agentError,
   accountStatus,
   remoteStatus,
   onClose,
   onRemoteChange,
   onSignIn,
+  onAgentSetup = () => undefined,
 }: SettingsDialogProps) {
+  const [section, setSection] = React.useState<"remote" | "agents">(
+    initialSection,
+  );
+  React.useEffect(() => {
+    if (open) setSection(initialSection);
+  }, [initialSection, open]);
+
   const signedIn = accountStatus.state === "signed_in";
   const busy = remoteStatus.state === "activating";
   const enabled = remoteStatus.state === "online";
@@ -60,75 +84,103 @@ export function SettingsDialog({
     <ModalDialog
       open={open}
       title="Settings"
-      description="Supporting controls for this CODRA desktop host."
+      description="Local agent toolchains and supporting desktop controls."
       className="settings-dialog"
       onClose={onClose}
     >
       <div className="settings-layout">
         <nav className="settings-navigation" aria-label="Settings sections">
           <span className="settings-navigation-label">Desktop</span>
-          <button type="button" aria-current="page">
+          <button
+            type="button"
+            aria-current={section === "agents" ? "page" : undefined}
+            data-active={section === "agents"}
+            onClick={() => setSection("agents")}
+          >
+            <span className="settings-nav-tool" aria-hidden="true">
+              &gt;_
+            </span>
+            Agent runtimes
+          </button>
+          <button
+            type="button"
+            aria-current={section === "remote" ? "page" : undefined}
+            data-active={section === "remote"}
+            onClick={() => setSection("remote")}
+          >
             <span className="settings-nav-signal" aria-hidden="true" />
             Remote access
           </button>
         </nav>
-        <section
-          className="settings-content"
-          aria-labelledby="remote-settings-title"
-        >
-          <div className="settings-section-heading">
-            <div>
-              <p className="settings-kicker">CONNECTIVITY</p>
-              <h3 id="remote-settings-title">Remote access</h3>
-            </div>
-            <button
-              className="switch-control"
-              type="button"
-              role="switch"
-              aria-label="Remote access"
-              aria-checked={enabled}
-              disabled={!signedIn || busy}
-              onClick={() => onRemoteChange(!enabled)}
-            >
-              <span className="switch-thumb" />
-            </button>
-          </div>
-
-          <div className="settings-status" data-state={remoteStatus.state}>
-            <span className="settings-status-indicator" aria-hidden="true" />
-            <div>
-              <strong>{copy.label}</strong>
-              <p>{copy.detail}</p>
-            </div>
-          </div>
-
-          {!signedIn ? (
-            <div className="settings-callout">
+        {section === "agents" ? (
+          <AgentRuntimeSettings
+            runtimes={runtimes}
+            setupKind={setupKind}
+            error={agentError}
+            onSetup={onAgentSetup}
+          />
+        ) : (
+          <section
+            className="settings-content"
+            aria-labelledby="remote-settings-title"
+          >
+            <div className="settings-section-heading">
               <div>
-                <strong>Sign in to enable remote access</strong>
-                <p>Your local terminals remain available without an account.</p>
+                <p className="settings-kicker">CONNECTIVITY</p>
+                <h3 id="remote-settings-title">Remote access</h3>
               </div>
               <button
-                className="secondary-button"
+                className="switch-control"
                 type="button"
-                onClick={onSignIn}
+                role="switch"
+                aria-label="Remote access"
+                aria-checked={enabled}
+                disabled={!signedIn || busy}
+                onClick={() => onRemoteChange(!enabled)}
               >
-                Sign in
+                <span className="switch-thumb" />
               </button>
             </div>
-          ) : null}
 
-          <div className="settings-boundary">
-            <p className="settings-kicker">SECURITY BOUNDARY</p>
-            <ul>
-              <li>Terminal traffic stays peer-to-peer over WebRTC.</li>
-              <li>
-                Cloudflare TURN is used only when a direct path is unavailable.
-              </li>
-              <li>Each incoming session requires approval on this Mac.</li>
-            </ul>
-          </div>
-        </section>
+            <div className="settings-status" data-state={remoteStatus.state}>
+              <span className="settings-status-indicator" aria-hidden="true" />
+              <div>
+                <strong>{copy.label}</strong>
+                <p>{copy.detail}</p>
+              </div>
+            </div>
+
+            {!signedIn ? (
+              <div className="settings-callout">
+                <div>
+                  <strong>Sign in to enable remote access</strong>
+                  <p>
+                    Your local terminals remain available without an account.
+                  </p>
+                </div>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={onSignIn}
+                >
+                  Sign in
+                </button>
+              </div>
+            ) : null}
+
+            <div className="settings-boundary">
+              <p className="settings-kicker">SECURITY BOUNDARY</p>
+              <ul>
+                <li>Terminal traffic stays peer-to-peer over WebRTC.</li>
+                <li>
+                  Cloudflare TURN is used only when a direct path is
+                  unavailable.
+                </li>
+                <li>Each incoming session requires approval on this Mac.</li>
+              </ul>
+            </div>
+          </section>
+        )}
       </div>
     </ModalDialog>
   );

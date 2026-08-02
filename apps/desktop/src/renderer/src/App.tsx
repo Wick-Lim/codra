@@ -2,6 +2,7 @@ import React from "react";
 import type {
   AgentLaunchRequest,
   AgentRuntime,
+  AgentSetupRequest,
   RemoteAccountStatus,
   RemoteAuthProvider,
   RemoteHostStatus,
@@ -20,6 +21,7 @@ export default function App() {
     activeTerminal,
     createTerminal,
     createAgent,
+    setupAgent,
     selectTerminal,
     closeTerminal,
   } = useTerminals();
@@ -31,10 +33,29 @@ export default function App() {
   );
   const [signInOpen, setSignInOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [settingsSection, setSettingsSection] = React.useState<
+    "remote" | "agents"
+  >("remote");
   const [agentDialogOpen, setAgentDialogOpen] = React.useState(false);
   const [agentRuntimes, setAgentRuntimes] = React.useState<AgentRuntime[]>([]);
   const [agentStarting, setAgentStarting] = React.useState(false);
   const [agentError, setAgentError] = React.useState<string>();
+  const [agentDiscoveryError, setAgentDiscoveryError] =
+    React.useState<string>();
+  const [agentSetupError, setAgentSetupError] = React.useState<string>();
+  const [agentSetupKind, setAgentSetupKind] =
+    React.useState<AgentSetupRequest["kind"]>();
+  const [agentSetupTerminalId, setAgentSetupTerminalId] =
+    React.useState<string>();
+
+  const refreshAgentRuntimes = React.useCallback(async () => {
+    try {
+      setAgentRuntimes(await window.codra.agents.list());
+      setAgentDiscoveryError(undefined);
+    } catch {
+      setAgentDiscoveryError("Agent CLI discovery failed.");
+    }
+  }, []);
 
   React.useEffect(() => {
     const stopListening = window.codra.remote.onStateChanged(setRemoteStatus);
@@ -49,10 +70,7 @@ export default function App() {
           message: "REMOTE_STATUS_UNAVAILABLE",
         }),
       );
-    void window.codra.agents
-      .list()
-      .then(setAgentRuntimes)
-      .catch(() => setAgentError("Agent CLI discovery failed."));
+    void refreshAgentRuntimes();
     void window.codra.remote
       .getAuthState()
       .then(setAccountStatus)
@@ -66,15 +84,33 @@ export default function App() {
       stopListening();
       stopListeningAccount();
     };
-  }, []);
+  }, [refreshAgentRuntimes]);
+
+  React.useEffect(() => {
+    if (!agentSetupTerminalId) return;
+    const setupTerminal = terminals.find(
+      ({ id }) => id === agentSetupTerminalId,
+    );
+    if (setupTerminal?.state !== "exited") return;
+    setAgentSetupTerminalId(undefined);
+    setAgentSetupKind(undefined);
+    void refreshAgentRuntimes();
+  }, [agentSetupTerminalId, refreshAgentRuntimes, terminals]);
 
   function openAgentDialog(): void {
     setAgentDialogOpen(true);
     setAgentError(undefined);
-    void window.codra.agents
-      .list()
-      .then(setAgentRuntimes)
-      .catch(() => setAgentError("Agent CLI discovery failed."));
+    void refreshAgentRuntimes();
+  }
+
+  function openSettings(section: "remote" | "agents"): void {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+    if (section === "agents") {
+      setAgentDialogOpen(false);
+      setAgentSetupError(undefined);
+      void refreshAgentRuntimes();
+    }
   }
 
   async function startAgent(request: AgentLaunchRequest): Promise<void> {
@@ -92,6 +128,38 @@ export default function App() {
       );
     } finally {
       setAgentStarting(false);
+    }
+  }
+
+  async function startAgentSetup(request: AgentSetupRequest): Promise<void> {
+    setAgentSetupKind(request.kind);
+    setAgentSetupError(undefined);
+    try {
+      const result = await setupAgent(request);
+      if (result.kind === "terminal") {
+        setAgentSetupTerminalId(result.terminal.id);
+        setSettingsOpen(false);
+      } else {
+        setAgentSetupKind(undefined);
+        await refreshAgentRuntimes();
+      }
+    } catch (error) {
+      setAgentSetupKind(undefined);
+      const message = error instanceof Error ? error.message : "";
+      setAgentSetupError(
+        message.includes("AGENT_SETUP_IN_PROGRESS")
+          ? "This runtime already has an active setup terminal."
+          : "The runtime setup session could not be opened.",
+      );
+    }
+  }
+
+  async function closeWorkspaceTerminal(terminalId: string): Promise<void> {
+    await closeTerminal(terminalId);
+    if (terminalId === agentSetupTerminalId) {
+      setAgentSetupTerminalId(undefined);
+      setAgentSetupKind(undefined);
+      void refreshAgentRuntimes();
     }
   }
 
@@ -173,10 +241,10 @@ export default function App() {
             onCreateAgent={openAgentDialog}
             onCreateTerminal={() => void createTerminal()}
             onSelect={selectTerminal}
-            onClose={(terminalId) => void closeTerminal(terminalId)}
+            onClose={(terminalId) => void closeWorkspaceTerminal(terminalId)}
             accountStatus={accountStatus}
             onSignIn={() => setSignInOpen(true)}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => openSettings("remote")}
             onLogout={() => void logoutRemote()}
           />
 
@@ -213,7 +281,7 @@ export default function App() {
             type="button"
             data-state={remoteStatus.state}
             aria-label={`Remote ${remoteStatusLabel} — open settings`}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => openSettings("remote")}
           >
             <span className="status-remote-dot" aria-hidden="true" />
             Remote {remoteStatusLabel}
@@ -239,14 +307,19 @@ export default function App() {
         open={agentDialogOpen}
         agents={agentRuntimes}
         busy={agentStarting}
-        error={agentError}
+        error={agentError ?? agentDiscoveryError}
         onClose={() => {
           if (!agentStarting) setAgentDialogOpen(false);
         }}
         onStart={(request) => void startAgent(request)}
+        onOpenAgentSettings={() => openSettings("agents")}
       />
       <SettingsDialog
         open={settingsOpen}
+        initialSection={settingsSection}
+        runtimes={agentRuntimes}
+        setupKind={agentSetupKind}
+        agentError={agentSetupError ?? agentDiscoveryError}
         accountStatus={accountStatus}
         remoteStatus={remoteStatus}
         onClose={() => setSettingsOpen(false)}
@@ -255,6 +328,7 @@ export default function App() {
           setSettingsOpen(false);
           setSignInOpen(true);
         }}
+        onAgentSetup={(request) => void startAgentSetup(request)}
       />
     </React.Fragment>
   );

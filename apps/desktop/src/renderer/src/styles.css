@@ -1214,15 +1214,19 @@ button:focus-visible,
 }
 
 .agent-description {
-  margin: 11px 0 16px;
+  margin: 9px 0 13px;
   color: var(--muted);
   font-size: 9px;
   line-height: 1.5;
 }
 
 .agent-install-hint {
-  margin: -5px 0 15px;
-  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 0 15px;
+  padding: 9px 10px;
   color: #f1c58c;
   background: rgb(216 162 94 / 8%);
   border: 1px solid rgb(216 162 94 / 23%);
@@ -1230,6 +1234,45 @@ button:focus-visible,
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 8px;
   line-height: 1.45;
+}
+
+.agent-install-hint strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--fog-soft);
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-size: 9px;
+}
+
+.agent-install-hint p {
+  margin: 0;
+}
+
+.agent-install-hint button {
+  flex: 0 0 auto;
+  min-height: 29px;
+  padding: 5px 9px;
+  color: var(--fog);
+  background: var(--bulkhead-raised);
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--steel));
+  border-radius: 5px;
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.agent-install-hint button:not(:disabled):hover {
+  border-color: var(--warning);
+}
+
+.agent-run-configuration-label {
+  margin: 2px 0 8px;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .agent-model-stack {
@@ -1294,21 +1337,23 @@ button:focus-visible,
 
 .agent-prompt-field {
   display: grid;
+  margin-bottom: 15px;
 }
 
 .agent-prompt-field textarea {
   width: 100%;
-  min-height: 112px;
-  padding: 11px 12px;
+  min-height: 158px;
+  padding: 13px 14px;
   resize: vertical;
   color: var(--fog);
   caret-color: var(--signal);
   background: var(--obsidian);
-  border: 1px solid var(--steel);
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--steel) 76%, var(--signal));
+  border-radius: 7px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 2%);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 10px;
-  line-height: 1.55;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .agent-prompt-field textarea::placeholder {
@@ -1427,10 +1472,13 @@ button:focus-visible,
 .settings-layout {
   display: grid;
   grid-template-columns: 174px minmax(0, 1fr);
-  min-height: 380px;
+  min-height: 430px;
 }
 
 .settings-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   padding: 17px 12px;
   background: color-mix(in srgb, var(--deck) 86%, var(--bulkhead));
   border-right: 1px solid var(--steel);
@@ -1454,11 +1502,23 @@ button:focus-visible,
   min-height: 34px;
   padding: 6px 8px;
   color: var(--fog-soft);
-  background: var(--bulkhead);
-  border: 1px solid var(--steel-soft);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 5px;
   font-size: 10px;
   text-align: left;
+}
+
+.settings-navigation button:hover {
+  background: rgb(255 255 255 / 3%);
+  border-color: var(--steel-soft);
+}
+
+.settings-navigation button[data-active="true"] {
+  color: var(--fog);
+  background: var(--bulkhead);
+  border-color: var(--steel);
+  box-shadow: inset 2px 0 0 var(--signal);
 }
 
 .settings-nav-signal {
@@ -1467,6 +1527,19 @@ button:focus-visible,
   background: var(--signal);
   border-radius: 50%;
   box-shadow: 0 0 0 3px rgb(145 167 255 / 11%);
+}
+
+.settings-nav-tool {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  color: var(--signal);
+  border: 1px solid var(--steel);
+  border-radius: 3px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 6px;
+  font-weight: 750;
 }
 
 .settings-content {
@@ -1633,6 +1706,163 @@ button:focus-visible,
   color: var(--signal);
 }
 
+.agent-runtime-settings {
+  min-width: 0;
+}
+
+.runtime-count {
+  display: grid;
+  min-width: 30px;
+  height: 24px;
+  padding: 0 6px;
+  place-items: center;
+  color: var(--signal);
+  background: var(--obsidian);
+  border: 1px solid var(--steel);
+  border-radius: 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
+.agent-runtime-intro {
+  margin: 10px 0 17px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.runtime-rack {
+  position: relative;
+  border-top: 1px solid var(--steel);
+  border-bottom: 1px solid var(--steel);
+}
+
+.runtime-rack::before {
+  position: absolute;
+  top: 17px;
+  bottom: 17px;
+  left: 4px;
+  width: 1px;
+  background: var(--steel);
+  content: "";
+}
+
+.runtime-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) minmax(136px, auto);
+  align-items: center;
+  gap: 11px;
+  min-height: 76px;
+  padding: 11px 0;
+}
+
+.runtime-row + .runtime-row {
+  border-top: 1px solid var(--steel-soft);
+}
+
+.runtime-row[data-busy="true"] {
+  background: linear-gradient(90deg, rgb(145 167 255 / 5%), transparent 72%);
+}
+
+.runtime-status-node {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  background: var(--warning);
+  border: 2px solid var(--bulkhead-raised);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--warning) 62%, var(--steel));
+}
+
+.runtime-status-node[data-available="true"] {
+  background: var(--live);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--live) 62%, var(--steel));
+}
+
+.runtime-row-copy {
+  min-width: 0;
+}
+
+.runtime-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.runtime-row-title strong {
+  color: var(--fog);
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.runtime-row-title span {
+  color: var(--muted-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runtime-row-copy p {
+  max-width: 315px;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.runtime-row-action {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.runtime-state-label,
+.runtime-no-auth {
+  color: var(--muted-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.runtime-row[data-available="true"] .runtime-state-label,
+.runtime-no-auth {
+  color: var(--live);
+}
+
+.runtime-action-button {
+  min-height: 28px;
+  padding: 5px 9px;
+  color: var(--fog-soft);
+  background: var(--bulkhead);
+  border: 1px solid var(--steel);
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 680;
+}
+
+.runtime-action-button:not(:disabled):hover {
+  color: var(--fog);
+  border-color: var(--signal);
+}
+
+.runtime-action-button:disabled {
+  opacity: 0.48;
+}
+
+.runtime-credential-note,
+.runtime-empty {
+  margin: 15px 0 0;
+  color: var(--muted-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 7px;
+  line-height: 1.55;
+}
+
 @keyframes modal-arrive {
   from {
     opacity: 0;
@@ -1697,6 +1927,26 @@ button:focus-visible,
 
   .settings-layout {
     grid-template-columns: 148px minmax(0, 1fr);
+  }
+
+  .new-agent-dialog {
+    width: calc(100vw - 32px);
+  }
+
+  .new-agent-dialog .modal-body {
+    padding-inline: 16px;
+  }
+
+  .agent-catalog-layout {
+    grid-template-columns: 182px minmax(0, 1fr);
+  }
+
+  .agent-config-panel {
+    padding: 15px 16px;
+  }
+
+  .runtime-row {
+    grid-template-columns: 10px minmax(0, 1fr) 132px;
   }
 }
 
