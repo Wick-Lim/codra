@@ -198,6 +198,38 @@ describe("createDesktopApi", () => {
     await expect(malformed.agents.list()).rejects.toThrow();
   });
 
+  it("validates agent setup requests and discriminated results", async () => {
+    const terminalResult = { kind: "terminal", terminal: descriptor };
+    const ipc = new FakeIpcRenderer(
+      new Map([[IPC_CHANNELS.agentSetup, terminalResult]]),
+    );
+    const api = createDesktopApi(ipc);
+
+    await expect(
+      api.agents.setup({ kind: "codex", action: "install" }),
+    ).resolves.toEqual(terminalResult);
+    expect(ipc.invocations).toEqual([
+      {
+        channel: IPC_CHANNELS.agentSetup,
+        args: [{ kind: "codex", action: "install" }],
+      },
+    ]);
+
+    const malformed = createDesktopApi(
+      new FakeIpcRenderer(
+        new Map([
+          [
+            IPC_CHANNELS.agentSetup,
+            { kind: "external", url: "https://attacker.example" },
+          ],
+        ]),
+      ),
+    );
+    await expect(
+      malformed.agents.setup({ kind: "gemini", action: "install" }),
+    ).rejects.toThrow();
+  });
+
   it.each([
     {
       label: "create",

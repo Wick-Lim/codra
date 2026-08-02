@@ -99,7 +99,9 @@ export class TerminalManager {
       id: randomUUID(),
       title: request.agent
         ? agentTerminalTitle(request.agent.kind, request.agent.model)
-        : "Terminal",
+        : request.agentSetup
+          ? `Setup ${agentTerminalTitle(request.agentSetup.kind)}`
+          : "Terminal",
       cwd,
       cols: request.cols,
       rows: request.rows,

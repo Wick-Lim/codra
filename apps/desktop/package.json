@@ -15,8 +15,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "dependencies": {
-    "@codra/protocol": "workspace:*",
     "@codra/firebase": "workspace:*",
+    "@codra/protocol": "workspace:*",
     "@codra/webrtc": "workspace:*",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
@@ -24,6 +24,7 @@
     "firebase": "12.17.0",
     "node-datachannel": "0.32.3",
     "node-pty": "1.1.0",
+    "npm": "12.0.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

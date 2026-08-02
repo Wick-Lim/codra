@@ -4,6 +4,17 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig(({ command }) => ({
   main: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "agent-setup-runner": resolve(
+            __dirname,
+            "src/main/terminal/agent-setup-runner.ts",
+          ),
+        },
+      },
+    },
     plugins: [
       externalizeDepsPlugin({
         exclude: ["@codra/protocol", "@codra/firebase", "@codra/webrtc"],

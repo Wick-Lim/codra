@@ -287,6 +287,25 @@ describe("TerminalManager", () => {
     });
   });
 
+  it("labels an agent setup terminal with the selected runtime", async () => {
+    const { manager, factory } = createHarness();
+    const setupRequest = {
+      ...request,
+      agentSetup: {
+        kind: "gemini" as const,
+        action: "install" as const,
+      },
+    };
+
+    const terminal = await manager.create(setupRequest);
+
+    expect(terminal.title).toBe("Setup Gemini");
+    expect(factory.spawn).toHaveBeenCalledWith({
+      ...setupRequest,
+      cwd: expect.any(String),
+    });
+  });
+
   it("rolls back a partially persisted descriptor when save fails", async () => {
     const repository = new MemoryRepository();
     const saveError = new Error("save failed after commit");

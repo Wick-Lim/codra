@@ -92,6 +92,7 @@ function createPaneApi(
   const outputUnsubscribes: ReturnType<typeof vi.fn>[] = [];
   const api: CodraDesktopApi = {
     agents: {
+      setup: vi.fn(),
       list: vi.fn().mockResolvedValue([
         {
           kind: "codex",

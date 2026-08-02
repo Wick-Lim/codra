@@ -1,5 +1,7 @@
 import type {
   AgentLaunchRequest,
+  AgentSetupRequest,
+  AgentSetupResult,
   CodraDesktopApi,
   TerminalDescriptor,
 } from "@codra/protocol";
@@ -11,6 +13,7 @@ export interface UseTerminalsResult {
   activeTerminal: TerminalDescriptor | null;
   createTerminal(): Promise<void>;
   createAgent(request: AgentLaunchRequest): Promise<void>;
+  setupAgent(request: AgentSetupRequest): Promise<AgentSetupResult>;
   selectTerminal(terminalId: string): void;
   closeTerminal(terminalId: string): Promise<void>;
 }
@@ -107,6 +110,18 @@ export function useTerminals(
     [api],
   );
 
+  const setupAgent = useCallback(
+    async (request: AgentSetupRequest): Promise<AgentSetupResult> => {
+      const result = await api.agents.setup(request);
+      if (result.kind === "terminal") {
+        setTerminals((current) => replaceDescriptor(current, result.terminal));
+        setActiveTerminalId(result.terminal.id);
+      }
+      return result;
+    },
+    [api],
+  );
+
   const selectTerminal = useCallback((terminalId: string) => {
     setActiveTerminalId(terminalId);
   }, []);
@@ -134,6 +149,7 @@ export function useTerminals(
     activeTerminal,
     createTerminal,
     createAgent,
+    setupAgent,
     selectTerminal,
     closeTerminal,
   };

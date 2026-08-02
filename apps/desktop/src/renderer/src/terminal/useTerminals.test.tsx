@@ -30,6 +30,7 @@ function createDesktopApiFake() {
   const api: CodraDesktopApi = {
     agents: {
       list: vi.fn().mockResolvedValue([]),
+      setup: vi.fn(),
     },
     terminal: {
       list: vi.fn().mockResolvedValue([]),
@@ -160,6 +161,44 @@ describe("useTerminals", () => {
       },
     });
     expect(result.current.activeTerminal?.title).toBe("Codex");
+  });
+
+  it("adds and selects a setup terminal returned by the agent setup API", async () => {
+    const fake = createDesktopApiFake();
+    const setupTerminal = { ...secondTerminal, title: "Setup Gemini" };
+    vi.mocked(fake.api.agents.setup).mockResolvedValue({
+      kind: "terminal",
+      terminal: setupTerminal,
+    });
+    const { result } = renderHook(() => useTerminals(fake.api));
+
+    await act(async () => {
+      await expect(
+        result.current.setupAgent({ kind: "gemini", action: "install" }),
+      ).resolves.toEqual({ kind: "terminal", terminal: setupTerminal });
+    });
+
+    expect(fake.api.agents.setup).toHaveBeenCalledWith({
+      kind: "gemini",
+      action: "install",
+    });
+    expect(result.current.terminals).toEqual([setupTerminal]);
+    expect(result.current.activeTerminalId).toBe(setupTerminal.id);
+  });
+
+  it("does not invent a terminal for external setup", async () => {
+    const fake = createDesktopApiFake();
+    vi.mocked(fake.api.agents.setup).mockResolvedValue({ kind: "external" });
+    const { result } = renderHook(() => useTerminals(fake.api));
+
+    await act(async () => {
+      await expect(
+        result.current.setupAgent({ kind: "ollama", action: "install" }),
+      ).resolves.toEqual({ kind: "external" });
+    });
+
+    expect(result.current.terminals).toEqual([]);
+    expect(result.current.activeTerminalId).toBeNull();
   });
 
   it("removes an explicitly closed terminal and ignores its late exit event", async () => {

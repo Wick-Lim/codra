@@ -172,6 +172,18 @@ const defaultDependencies: AgentRuntimeDependencies = {
   },
 };
 
+export function createAgentRuntimeDependencies(
+  paths: Pick<
+    AgentRuntimeDependencies,
+    | "managedInstallDirectory"
+    | "electronExecutable"
+    | "npmCliPath"
+    | "setupRunnerPath"
+  >,
+): AgentRuntimeDependencies {
+  return { ...defaultDependencies, ...paths };
+}
+
 function candidateExecutables(
   kind: AgentKind,
   dependencies: AgentRuntimeDependencies,

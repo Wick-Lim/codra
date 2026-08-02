@@ -6,7 +6,18 @@ const remoteTestOutput = "out-remote-test";
 
 export default defineConfig({
   main: {
-    build: { outDir: `${remoteTestOutput}/main` },
+    build: {
+      outDir: `${remoteTestOutput}/main`,
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, "src/main/index.ts"),
+          "agent-setup-runner": resolve(
+            __dirname,
+            "src/main/terminal/agent-setup-runner.ts",
+          ),
+        },
+      },
+    },
     plugins: [
       externalizeDepsPlugin({
         exclude: ["@codra/protocol", "@codra/firebase", "@codra/webrtc"],

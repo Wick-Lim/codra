@@ -130,12 +130,14 @@ function createIpcHarness() {
     },
   ];
   const listAgents = vi.fn(() => agents);
+  const openExternal = vi.fn(async () => undefined);
   const unregister = registerTerminalIpc({
     ipc,
     manager,
     windows: () => windows,
     isTrustedRendererUrl: (url) => url === trustedRendererUrl,
     listAgents,
+    openExternal,
   });
 
   const trustedEvent = () => ({
@@ -146,6 +148,7 @@ function createIpcHarness() {
   return {
     manager,
     listAgents,
+    openExternal,
     windows,
     ipc,
     unregister,
@@ -182,6 +185,65 @@ describe("registerTerminalIpc", () => {
       { kind: "gemini", available: false },
     ]);
     expect(harness.listAgents).toHaveBeenCalledOnce();
+  });
+
+  it("creates one guarded setup terminal per agent runtime", async () => {
+    const harness = createIpcHarness();
+    const setupDescriptor = { ...descriptor, title: "Setup Codex" };
+    harness.manager.create.mockResolvedValue(setupDescriptor);
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentSetup, {
+        kind: "codex",
+        action: "install",
+      }),
+    ).resolves.toEqual({ kind: "terminal", terminal: setupDescriptor });
+    expect(harness.manager.create).toHaveBeenCalledWith({
+      cols: 100,
+      rows: 30,
+      agentSetup: { kind: "codex", action: "install" },
+    });
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentSetup, {
+        kind: "codex",
+        action: "authenticate",
+      }),
+    ).rejects.toThrow("AGENT_SETUP_IN_PROGRESS");
+
+    harness.emitChanged({
+      ...setupDescriptor,
+      state: "exited",
+      exitCode: 0,
+    });
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentSetup, {
+        kind: "codex",
+        action: "authenticate",
+      }),
+    ).resolves.toMatchObject({ kind: "terminal" });
+  });
+
+  it("opens only the fixed Ollama download and rejects Ollama authentication", async () => {
+    const harness = createIpcHarness();
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentSetup, {
+        kind: "ollama",
+        action: "install",
+      }),
+    ).resolves.toEqual({ kind: "external" });
+    expect(harness.openExternal).toHaveBeenCalledWith(
+      "https://ollama.com/download/mac",
+    );
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentSetup, {
+        kind: "ollama",
+        action: "authenticate",
+      }),
+    ).rejects.toThrow();
+    expect(harness.manager.create).not.toHaveBeenCalled();
   });
 
   it("validates create requests before invoking the manager", async () => {
@@ -375,6 +437,9 @@ describe("registerTerminalIpc", () => {
     harness.emitOutput(chunk);
     harness.emitChanged(descriptor);
 
+    expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
+      IPC_CHANNELS.agentSetup,
+    );
     expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
       IPC_CHANNELS.terminalList,
     );

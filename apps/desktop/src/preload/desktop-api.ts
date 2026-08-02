@@ -1,5 +1,7 @@
 import {
   AgentRuntimeSchema,
+  AgentSetupRequestSchema,
+  AgentSetupResultSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   RemoteAccountStatusSchema,
@@ -36,6 +38,14 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
       async list() {
         return AgentRuntimeSchema.array().parse(
           await ipc.invoke(IPC_CHANNELS.agentList),
+        );
+      },
+      async setup(request) {
+        return AgentSetupResultSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentSetup,
+            AgentSetupRequestSchema.parse(request),
+          ),
         );
       },
     },

@@ -1,11 +1,18 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { join } from "node:path";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { bootstrapDesktop } from "./bootstrap";
 import { registerTerminalIpc } from "./ipc/terminal-ipc";
 import { registerRemoteIpc } from "./ipc/remote-ipc";
 import { DesktopLifecycle } from "./lifecycle";
 import { TerminalManager } from "./terminal/manager";
 import { NodePtyFactory } from "./terminal/node-pty";
+import {
+  createAgentRuntimeDependencies,
+  listAgentRuntimes,
+  resolveAgentCommand,
+  resolveAgentSetupCommand,
+} from "./terminal/agent-runtime";
 import { FileTerminalOutputStore } from "./terminal/scrollback";
 import { SqliteTerminalRepository } from "./terminal/sqlite";
 import {
@@ -20,6 +27,7 @@ import type { RemoteSession } from "@codra/protocol";
 
 let mainWindow: BrowserWindow | undefined;
 let rendererUrlPolicy: RendererUrlPolicy | undefined;
+const requireFromMain = createRequire(__filename);
 
 const isolatedUserDataPath = process.env.CODRA_USER_DATA_DIR;
 if (
@@ -72,6 +80,14 @@ function reportFatal(error: unknown): void {
   app.exit(1);
 }
 
+function resolveBundledNpmCliPath(): string {
+  return join(
+    dirname(requireFromMain.resolve("npm/package.json")),
+    "bin",
+    "npm-cli.js",
+  );
+}
+
 async function startPrimaryInstance(): Promise<void> {
   rendererUrlPolicy = createRendererUrlPolicy({
     rendererHtmlPath: join(__dirname, "../renderer/index.html"),
@@ -108,6 +124,13 @@ async function startPrimaryInstance(): Promise<void> {
     reportError: (error) => console.error("Remote IPC error", error),
   });
 
+  const agentRuntimeDependencies = createAgentRuntimeDependencies({
+    managedInstallDirectory: join(app.getPath("userData"), "agent-tools"),
+    electronExecutable: process.execPath,
+    npmCliPath: resolveBundledNpmCliPath(),
+    setupRunnerPath: join(__dirname, "agent-setup-runner.js"),
+  });
+
   await bootstrapDesktop({
     app,
     userDataPath: app.getPath("userData"),
@@ -119,10 +142,20 @@ async function startPrimaryInstance(): Promise<void> {
     createRepository: (databasePath) =>
       new SqliteTerminalRepository(databasePath),
     createOutputStore: (outputPath) => new FileTerminalOutputStore(outputPath),
-    createPtyFactory: () => new NodePtyFactory(),
+    createPtyFactory: () =>
+      new NodePtyFactory(
+        (launch) => resolveAgentCommand(launch, agentRuntimeDependencies),
+        (request) =>
+          resolveAgentSetupCommand(request, agentRuntimeDependencies),
+      ),
     createManager: (ptyFactory, repository, outputStore) =>
       new TerminalManager(ptyFactory, repository, outputStore),
-    registerIpc: registerTerminalIpc,
+    registerIpc: (options) =>
+      registerTerminalIpc({
+        ...options,
+        listAgents: () => listAgentRuntimes(agentRuntimeDependencies),
+        openExternal: (url) => shell.openExternal(url),
+      }),
     createLifecycle: (options) => new DesktopLifecycle(options),
     createWindow,
     stopRemoteHost: () => remoteHost.stop(),

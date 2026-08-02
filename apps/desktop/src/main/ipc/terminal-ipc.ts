@@ -1,5 +1,7 @@
 import {
   AgentRuntimeSchema,
+  AgentSetupRequestSchema,
+  AgentSetupResultSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   ReplayTerminalRequestSchema,
@@ -7,6 +9,7 @@ import {
   TerminalIdSchema,
   WriteTerminalRequestSchema,
   type CreateTerminalRequest,
+  type AgentKind,
   type AgentRuntime,
   type ReplayTerminalRequest,
   type ResizeTerminalRequest,
@@ -51,11 +54,15 @@ export interface RegisterTerminalIpcOptions {
   isTrustedRendererUrl(url: string): boolean;
   admission?: TerminalRequestAdmission;
   listAgents?(): AgentRuntime[] | Promise<AgentRuntime[]>;
+  openExternal?(url: string): Promise<void>;
   reportError?(error: unknown): void;
 }
 
+const OLLAMA_DOWNLOAD_URL = "https://ollama.com/download/mac";
+
 const requestChannels = [
   IPC_CHANNELS.agentList,
+  IPC_CHANNELS.agentSetup,
   IPC_CHANNELS.terminalList,
   IPC_CHANNELS.terminalCreate,
   IPC_CHANNELS.terminalWrite,
@@ -96,8 +103,12 @@ export function registerTerminalIpc({
   isTrustedRendererUrl,
   admission = new TerminalAdmissionGate(),
   listAgents = listAgentRuntimes,
+  openExternal = async () => {
+    throw new Error("AGENT_EXTERNAL_SETUP_UNAVAILABLE");
+  },
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
+  const activeSetups = new Map<AgentKind, string | null>();
   const authorize = (event: unknown): void =>
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   const registrations: readonly [string, IpcHandler][] = [
@@ -106,6 +117,38 @@ export function registerTerminalIpc({
       async (event) => {
         authorize(event);
         return AgentRuntimeSchema.array().parse(await listAgents());
+      },
+    ],
+    [
+      IPC_CHANNELS.agentSetup,
+      (event, rawRequest) => {
+        authorize(event);
+        const request = AgentSetupRequestSchema.parse(rawRequest);
+        return admission.run(async () => {
+          if (request.kind === "ollama") {
+            await openExternal(OLLAMA_DOWNLOAD_URL);
+            return AgentSetupResultSchema.parse({ kind: "external" });
+          }
+          if (activeSetups.has(request.kind)) {
+            throw new Error("AGENT_SETUP_IN_PROGRESS");
+          }
+          activeSetups.set(request.kind, null);
+          try {
+            const terminal = await manager.create({
+              cols: 100,
+              rows: 30,
+              agentSetup: request,
+            });
+            activeSetups.set(request.kind, terminal.id);
+            return AgentSetupResultSchema.parse({
+              kind: "terminal",
+              terminal,
+            });
+          } catch (error) {
+            activeSetups.delete(request.kind);
+            throw error;
+          }
+        });
       },
     ],
     [
@@ -180,6 +223,11 @@ export function registerTerminalIpc({
       );
     });
     unsubscribeChanged = manager.onChanged((descriptor) => {
+      if (descriptor.state === "exited") {
+        for (const [kind, terminalId] of activeSetups) {
+          if (terminalId === descriptor.id) activeSetups.delete(kind);
+        }
+      }
       sendToLiveWindows(
         windows,
         isTrustedRendererUrl,

@@ -97,6 +97,62 @@ describe("NodePtyFactory", () => {
     );
   });
 
+  it("spawns an agent setup command and merges its fixed environment", () => {
+    vi.spyOn(nodePty, "spawn").mockReturnValue({
+      pid: 42,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      onData: vi.fn(() => ({ dispose: vi.fn() })),
+      onExit: vi.fn(() => ({ dispose: vi.fn() })),
+    } as unknown as nodePty.IPty);
+    const resolveAgent = vi.fn();
+    const resolveAgentSetup = vi.fn(() => ({
+      executable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      args: [
+        "/app/agent-setup-runner.js",
+        "codex",
+        "/data/agent-tools",
+        "/app/npm-cli.js",
+      ],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        CODRA_AGENT_SETUP_RUNNER: "1",
+      },
+      title: "Setup Codex",
+    }));
+
+    new NodePtyFactory(resolveAgent, resolveAgentSetup).spawn({
+      cwd: "/workspace",
+      cols: 100,
+      rows: 30,
+      agentSetup: { kind: "codex", action: "install" },
+    });
+
+    expect(resolveAgent).not.toHaveBeenCalled();
+    expect(resolveAgentSetup).toHaveBeenCalledWith({
+      kind: "codex",
+      action: "install",
+    });
+    expect(nodePty.spawn).toHaveBeenCalledWith(
+      "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      [
+        "/app/agent-setup-runner.js",
+        "codex",
+        "/data/agent-tools",
+        "/app/npm-cli.js",
+      ],
+      expect.objectContaining({
+        cwd: "/workspace",
+        env: expect.objectContaining({
+          TERM: "xterm-256color",
+          ELECTRON_RUN_AS_NODE: "1",
+          CODRA_AGENT_SETUP_RUNNER: "1",
+        }),
+      }),
+    );
+  });
+
   it("runs zsh and reaps its child after observing real command output", async () => {
     vi.stubEnv("SHELL", "/bin/zsh");
     const pty = new NodePtyFactory().spawn({

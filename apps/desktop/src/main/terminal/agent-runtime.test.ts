@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createAgentRuntimeDependencies,
   listAgentRuntimes,
   resolveAgentCommand,
   resolveAgentSetupCommand,
@@ -29,6 +30,27 @@ function dependencies(
 }
 
 describe("local agent runtime registry", () => {
+  it("creates production dependencies with app-scoped managed paths", () => {
+    expect(
+      createAgentRuntimeDependencies({
+        managedInstallDirectory: "/user-data/agent-tools",
+        electronExecutable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+        npmCliPath: "/app/npm-cli.js",
+        setupRunnerPath: "/app/agent-setup-runner.js",
+      }),
+    ).toMatchObject({
+      managedInstallDirectory: "/user-data/agent-tools",
+      electronExecutable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      npmCliPath: "/app/npm-cli.js",
+      setupRunnerPath: "/app/agent-setup-runner.js",
+      envPath: expect.any(String),
+      homeDirectory: expect.any(String),
+      isExecutable: expect.any(Function),
+      isNodeScript: expect.any(Function),
+      runCommand: expect.any(Function),
+    });
+  });
+
   it("detects every known CLI and discovers provider-specific models", async () => {
     expect(
       await listAgentRuntimes(
