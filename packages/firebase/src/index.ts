@@ -57,8 +57,10 @@ import {
   type Signal,
 } from "@codra/protocol";
 import { z } from "zod";
+import { SignalSequenceCollector } from "./signal-subscription";
 
 export * from "./auth-client";
+export * from "./signal-subscription";
 
 type DeploymentConfig = ProductionDeploymentConfig | EmulatorDeploymentConfig;
 
@@ -353,6 +355,71 @@ export interface DrainSignalsOptions {
   afterSequence: number;
   limit?: number;
   verify?: (signal: Signal) => boolean | Promise<boolean>;
+}
+
+export interface SubscribeSignalsOptions {
+  firestore: Firestore;
+  uid: string;
+  sessionId: string;
+  negotiationId: string;
+  senderDeviceId: string;
+  recipientDeviceId: string;
+  afterSequence?: number;
+  verify?(signal: Signal): boolean | Promise<boolean>;
+  onSignals(signals: Signal[]): void;
+  onError(error: Error): void;
+}
+
+export function subscribeSignals(options: SubscribeSignalsOptions): () => void {
+  const afterSequence = options.afterSequence ?? 0;
+  const collector = new SignalSequenceCollector({
+    sessionId: options.sessionId,
+    negotiationId: options.negotiationId,
+    senderDeviceId: options.senderDeviceId,
+    recipientDeviceId: options.recipientDeviceId,
+    afterSequence,
+    verify: options.verify,
+    onSignals: options.onSignals,
+  });
+  let stopped = false;
+  let tail = Promise.resolve();
+  const unsubscribe = onSnapshot(
+    query(
+      signalCollection(options.firestore, options.uid, options.sessionId),
+      where("senderDeviceId", "==", options.senderDeviceId),
+      where("recipientDeviceId", "==", options.recipientDeviceId),
+      where("negotiationId", "==", options.negotiationId),
+      orderBy("sequence", "asc"),
+      startAfter(afterSequence),
+    ),
+    (snapshot) => {
+      const signals = snapshot.docs.map((document) => document.data());
+      tail = tail
+        .then(async () => {
+          if (!stopped) await collector.accept(signals);
+        })
+        .catch((error: unknown) => {
+          if (!stopped) {
+            options.onError(
+              error instanceof Error
+                ? error
+                : new Error("SIGNAL_LISTENER_FAILED"),
+            );
+          }
+        });
+    },
+    (error) => {
+      if (!stopped) {
+        options.onError(
+          new Error(`Firebase signal listener failed: ${error.code}`),
+        );
+      }
+    },
+  );
+  return () => {
+    stopped = true;
+    unsubscribe();
+  };
 }
 
 export async function drainSignals(

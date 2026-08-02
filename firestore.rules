@@ -52,6 +52,7 @@ service cloud.firestore {
         && request.resource.data.clientDeviceId == claimDeviceId()
         && request.resource.data.clientKeyThumbprint == claimThumbprint()
         && request.resource.data.clientDeviceGeneration == claimGeneration()
+        && request.resource.data.hostDeviceId != claimDeviceId()
         && request.resource.data.createdAt == request.time
         && request.resource.data.expiresAt > request.time
         && request.resource.data.expiresAt <= request.time + duration.value(8, 'h')

@@ -3,6 +3,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { z } from "zod";
 import {
   DEVICE_PRESENCE_LEASE_MS,
+  deriveSessionState,
   FUNCTION_REGION,
   PublicEcJwkSchema,
   RemoteDeviceSchema,
@@ -29,8 +30,11 @@ import {
   DeviceRegistrationInputSchema,
   parseCallableInput,
   assertActiveDevice,
+  assertCanInitiateRemoteSession,
+  assertRemoteClientKind,
   requireAccount,
   requireDeviceClaims,
+  resolveSessionPeerBinding,
 } from "./auth";
 
 const sessionInputSchema = z
@@ -65,6 +69,9 @@ const rejectionInputSchema = z
   .strict();
 
 const signalInputSchema = z.object({ signal: SignalSchema }).strict();
+const sessionPeerInputSchema = z
+  .object({ sessionId: z.string().uuid() })
+  .strict();
 
 function toMillis(value: Timestamp | number): number {
   return value instanceof Timestamp ? value.toMillis() : value;
@@ -185,9 +192,8 @@ export const createRemoteSession = onCall(
   async (request) => {
     const claims = requireDeviceClaims(request);
     await assertActiveDevice(claims);
-    if (claims.kind !== "browser")
-      throw new HttpsError("permission-denied", "BROWSER_DEVICE_REQUIRED");
     const input = parseCallableInput(sessionInputSchema, request.data);
+    assertCanInitiateRemoteSession(claims, input.hostDeviceId);
     const hostRef = adminDb.doc(
       `users/${claims.uid}/devices/${input.hostDeviceId}`,
     );
@@ -333,8 +339,7 @@ export const listHostDevices = onCall(
   async (request) => {
     const claims = requireDeviceClaims(request);
     await assertActiveDevice(claims);
-    if (claims.kind !== "browser")
-      throw new HttpsError("permission-denied", "BROWSER_DEVICE_REQUIRED");
+    assertRemoteClientKind(claims.kind);
     const now = Timestamp.now().toMillis();
     const snapshot = await adminDb
       .collection(`users/${claims.uid}/devices`)
@@ -346,6 +351,7 @@ export const listHostDevices = onCall(
     return {
       devices: snapshot.docs
         .map((item) => item.data())
+        .filter((item) => item.deviceId !== claims.deviceId)
         .filter((item) => toMillis(item.expiresAt as Timestamp) > now)
         .map((item) =>
           deviceForClient(
@@ -505,5 +511,70 @@ export const publishSignal = onCall(
       expiresAt: Timestamp.fromMillis(signal.expiresAt),
     });
     return signal;
+  },
+);
+
+export const getSessionPeerDevice = onCall(
+  { region: FUNCTION_REGION },
+  async (request) => {
+    const claims = requireDeviceClaims(request);
+    await assertActiveDevice(claims);
+    const input = parseCallableInput(sessionPeerInputSchema, request.data);
+    const sessionSnapshot = await adminDb
+      .doc(`users/${claims.uid}/remoteSessions/${input.sessionId}`)
+      .get();
+    if (!sessionSnapshot.exists) {
+      throw new HttpsError("not-found", "SESSION_NOT_FOUND");
+    }
+    const raw = sessionSnapshot.data() ?? {};
+    const remoteSession = RemoteSessionSchema.parse({
+      ...raw,
+      createdAt: toMillis(raw.createdAt as Timestamp),
+      expiresAt: toMillis(raw.expiresAt as Timestamp),
+      ...(raw.decidedAt === undefined
+        ? {}
+        : { decidedAt: toMillis(raw.decidedAt as Timestamp) }),
+      ...(raw.connectedAt === undefined
+        ? {}
+        : { connectedAt: toMillis(raw.connectedAt as Timestamp) }),
+      ...(raw.disconnectedAt === undefined
+        ? {}
+        : { disconnectedAt: toMillis(raw.disconnectedAt as Timestamp) }),
+      ...(raw.closedAt === undefined
+        ? {}
+        : { closedAt: toMillis(raw.closedAt as Timestamp) }),
+      ...(raw.updatedAt === undefined
+        ? {}
+        : { updatedAt: toMillis(raw.updatedAt as Timestamp) }),
+    });
+    const now = Timestamp.now().toMillis();
+    if (
+      deriveSessionState(remoteSession, now) === "expired" ||
+      !["approved", "signaling", "connected"].includes(remoteSession.status)
+    ) {
+      throw new HttpsError("failed-precondition", "SESSION_NOT_CONNECTABLE");
+    }
+    const peerBinding = resolveSessionPeerBinding(claims, remoteSession);
+    const peerSnapshot = await adminDb
+      .doc(`users/${claims.uid}/devices/${peerBinding.deviceId}`)
+      .get();
+    if (!peerSnapshot.exists) {
+      throw new HttpsError("not-found", "PEER_DEVICE_NOT_FOUND");
+    }
+    const peer = RemoteDeviceSchema.parse({
+      ...peerSnapshot.data(),
+      createdAt: toMillis(peerSnapshot.data()?.createdAt as Timestamp),
+      lastSeenAt: toMillis(peerSnapshot.data()?.lastSeenAt as Timestamp),
+      expiresAt: toMillis(peerSnapshot.data()?.expiresAt as Timestamp),
+    });
+    if (
+      peer.ownerUid !== claims.uid ||
+      peer.keyThumbprint !== peerBinding.keyThumbprint ||
+      peer.generation !== peerBinding.generation ||
+      peer.active !== true
+    ) {
+      throw new HttpsError("permission-denied", "PEER_DEVICE_REVOKED");
+    }
+    return deviceForClient(peer);
   },
 );

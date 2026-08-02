@@ -9,9 +9,11 @@ import { httpsCallable, type Functions } from "firebase/functions";
 import {
   RemoteDeviceSchema,
   RemoteSessionSchema,
+  SignalSchema,
   TurnCredentialResponseSchema,
   type RemoteDevice,
   type RemoteSession,
+  type Signal,
   type TurnCredentialResponse,
 } from "@codra/protocol";
 
@@ -139,4 +141,28 @@ export async function issueTurnCredentials(
   );
   const result = await callable({ sessionId });
   return TurnCredentialResponseSchema.parse(result.data);
+}
+
+export async function publishSignal(
+  functions: Functions,
+  signal: Signal,
+): Promise<Signal> {
+  const callable = httpsCallable<{ signal: Signal }, unknown>(
+    functions,
+    "publishSignal",
+  );
+  const result = await callable({ signal: SignalSchema.parse(signal) });
+  return SignalSchema.parse(result.data);
+}
+
+export async function getSessionPeerDevice(
+  functions: Functions,
+  sessionId: string,
+): Promise<RemoteDevice> {
+  const callable = httpsCallable<{ sessionId: string }, unknown>(
+    functions,
+    "getSessionPeerDevice",
+  );
+  const result = await callable({ sessionId });
+  return RemoteDeviceSchema.parse(result.data);
 }

@@ -50,6 +50,68 @@ export interface DeviceClaims {
   generation: number;
 }
 
+export function assertRemoteClientKind(
+  kind: unknown,
+): asserts kind is DeviceClaims["kind"] {
+  if (kind !== "browser" && kind !== "host") {
+    throw new HttpsError("permission-denied", "REMOTE_CLIENT_DEVICE_REQUIRED");
+  }
+}
+
+export function assertCanInitiateRemoteSession(
+  claims: DeviceClaims,
+  hostDeviceId: string,
+): void {
+  assertRemoteClientKind(claims.kind);
+  if (claims.deviceId === hostDeviceId) {
+    throw new HttpsError("failed-precondition", "REMOTE_SELF_TARGET_FORBIDDEN");
+  }
+}
+
+export interface RemoteSessionParticipantBinding {
+  clientDeviceId: string;
+  clientKeyThumbprint: string;
+  clientDeviceGeneration: number;
+  hostDeviceId: string;
+  hostKeyThumbprint: string;
+  hostDeviceGeneration: number;
+}
+
+export interface SessionPeerBinding {
+  deviceId: string;
+  keyThumbprint: string;
+  generation: number;
+}
+
+export function resolveSessionPeerBinding(
+  claims: DeviceClaims,
+  session: RemoteSessionParticipantBinding,
+): SessionPeerBinding {
+  const isClient =
+    session.clientDeviceId === claims.deviceId &&
+    session.clientKeyThumbprint === claims.keyThumbprint &&
+    session.clientDeviceGeneration === claims.generation;
+  if (isClient) {
+    return {
+      deviceId: session.hostDeviceId,
+      keyThumbprint: session.hostKeyThumbprint,
+      generation: session.hostDeviceGeneration,
+    };
+  }
+  const isHost =
+    session.hostDeviceId === claims.deviceId &&
+    session.hostKeyThumbprint === claims.keyThumbprint &&
+    session.hostDeviceGeneration === claims.generation;
+  if (isHost) {
+    return {
+      deviceId: session.clientDeviceId,
+      keyThumbprint: session.clientKeyThumbprint,
+      generation: session.clientDeviceGeneration,
+    };
+  }
+  throw new HttpsError("permission-denied", "SESSION_PARTICIPANT_REQUIRED");
+}
+
 export function requireDeviceClaims(
   request: CallableRequest<unknown>,
 ): DeviceClaims {
@@ -72,6 +134,7 @@ export function requireDeviceClaims(
   ) {
     throw new HttpsError("permission-denied", "DEVICE_CLAIMS_REQUIRED");
   }
+  assertRemoteClientKind(kind);
   return {
     uid: request.auth.uid,
     deviceId,
