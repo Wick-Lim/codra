@@ -73,8 +73,6 @@ requireText(
   "remote-test Vite config",
 );
 requireText(remoteVite, "firebase-emulator.ts", "remote-test Vite config");
-requireText(remoteVite, '"demo-codra"', "remote-test Vite config");
-requireText(remoteVite, '"http://127.0.0.1:5000"', "remote-test Vite config");
 requireText(remoteVite, "out-remote-test", "remote-test Vite config");
 requireText(webVite, "account-bootstrap-google.ts", "web release Vite config");
 requireText(webVite, "firebase-production.ts", "web release Vite config");
@@ -89,7 +87,6 @@ requireText(
   "firebase-emulator.ts",
   "web remote-test Vite config",
 );
-requireText(webRemoteVite, '"demo-codra"', "web remote-test Vite config");
 
 requireText(
   releaseBuilder,

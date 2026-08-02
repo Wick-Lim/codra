@@ -4,10 +4,6 @@ import { resolve } from "node:path";
 
 export default defineConfig({
   build: { outDir: "dist-remote-test" },
-  define: {
-    __CODRA_BUILD_FLAVOR__: JSON.stringify("remote-test"),
-    __CODRA_FIREBASE_PROJECT_ID__: JSON.stringify("demo-codra"),
-  },
   plugins: [react()],
   resolve: {
     alias: {

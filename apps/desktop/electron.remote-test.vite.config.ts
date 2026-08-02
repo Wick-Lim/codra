@@ -1,10 +1,11 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
+import { codraRendererCspPlugin } from "./renderer-csp-plugin";
 
 const remoteTestOutput = "out-remote-test";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   main: {
     build: {
       outDir: `${remoteTestOutput}/main`,
@@ -50,14 +51,7 @@ export default defineConfig({
   },
   renderer: {
     build: { outDir: `${remoteTestOutput}/renderer` },
-    define: {
-      __CODRA_BUILD_FLAVOR__: JSON.stringify("remote-test"),
-      __CODRA_FIREBASE_PROJECT_ID__: JSON.stringify("demo-codra"),
-      __CODRA_FIREBASE_AUTH_EMULATOR_ORIGIN__: JSON.stringify(
-        "http://127.0.0.1:5000",
-      ),
-    },
-    plugins: [react()],
+    plugins: [react(), codraRendererCspPlugin(command)],
     resolve: { alias: {} },
   },
-});
+}));

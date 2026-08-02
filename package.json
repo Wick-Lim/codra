@@ -18,8 +18,6 @@
     "test:firebase-rules": "pnpm --filter @codra/firebase test:rules",
     "stage:functions-deploy": "node scripts/stage-functions-deploy.mjs",
     "test:functions-deploy-artifact": "node scripts/test-functions-deploy-artifact.mjs",
-    "build:release-candidate": "node scripts/build-codra-release-candidate.mjs",
-    "verify:release-candidate": "node scripts/verify-codra-release-candidate.mjs",
     "test:firebase-claim-canary": "node scripts/run-firebase-claim-canary.mjs",
     "resume:firebase-claim-canary": "node scripts/resume-firebase-claim-canary.mjs",
     "test:resume-firebase-claim-canary": "node scripts/test-resume-firebase-claim-canary.mjs",
@@ -31,8 +29,6 @@
     "verify:remote-build-config": "node scripts/verify-remote-build-config.mjs",
     "verify:firebase-indexes": "node scripts/verify-firebase-indexes.mjs",
     "scan:client-artifacts": "node scripts/scan-client-artifacts.mjs",
-    "test:release-remote-disabled": "playwright test tests/e2e/release-remote-disabled.spec.ts",
-    "verify:remote-release": "node scripts/verify-remote-release.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format:check": "prettier --check ."

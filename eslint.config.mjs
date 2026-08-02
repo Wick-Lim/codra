@@ -10,6 +10,7 @@ export default tseslint.config(
       "**/dist/**",
       "**/dist-remote-test/**",
       "**/functions-deploy-build/**",
+      "**/.worktrees/**",
     ],
   },
   js.configs.recommended,

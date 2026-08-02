@@ -1,6 +1,7 @@
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
+import { codraRendererCspPlugin } from "./renderer-csp-plugin";
 
 export default defineConfig(({ command }) => ({
   main: {
@@ -46,16 +47,6 @@ export default defineConfig(({ command }) => ({
   },
   renderer: {
     resolve: { alias: {} },
-    plugins: [
-      react(),
-      {
-        name: "codra-renderer-csp",
-        transformIndexHtml(html) {
-          const connectSource =
-            command === "serve" ? "'self' ws: wss:" : "'none'";
-          return html.replace("__CODRA_CONNECT_SRC__", connectSource);
-        },
-      },
-    ],
+    plugins: [react(), codraRendererCspPlugin(command)],
   },
 }));
