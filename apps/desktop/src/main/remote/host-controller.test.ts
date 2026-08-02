@@ -309,6 +309,35 @@ describe("RemoteHostController session approval", () => {
     ]);
   });
 
+  it("leaves requesterDisplayName unset when the requester is absent from listHostDevices", async () => {
+    mocks.listHostDevices.mockResolvedValue([
+      { deviceId: HOST_DEVICE_ID, displayName: "Studio-Mac" },
+    ]);
+    const { controller, deliverPending } = await activatedController();
+
+    deliverPending(pendingSession());
+    await vi.waitFor(() =>
+      expect(controller.getPendingSessions()).toHaveLength(1),
+    );
+    // handlePending inserts the entry synchronously, before the async
+    // requester-name resolution it kicks off has run. That resolution can
+    // only ever *add* a requesterDisplayName (session-approval.ts's
+    // `present()` assigns it and never clears it), so waiting here for it
+    // to settle and then re-asserting is what actually exercises the
+    // absent-requester path, rather than reading a snapshot taken before
+    // resolution had a chance to run.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(controller.getPendingSessions()).toEqual([
+      {
+        sessionId: SESSION_ID,
+        clientDeviceId: CLIENT_DEVICE_ID,
+        requestedScopes: ["workspace.read", "agent.launch"],
+        expiresAt: expect.any(Number),
+      },
+    ]);
+  });
+
   it("refuses scopes outside the request and clears the registry on deactivate", async () => {
     const { controller, deliverPending } = await activatedController();
     deliverPending(pendingSession());
@@ -329,5 +358,23 @@ describe("RemoteHostController session approval", () => {
     await expect(
       controller.rejectSession({ sessionId: SESSION_ID }),
     ).rejects.toThrow("REMOTE_SESSION_NOT_PENDING");
+  });
+
+  it("refuses to approve a session that was pending before deactivate", async () => {
+    const { controller, deliverPending } = await activatedController();
+    deliverPending(pendingSession());
+    await vi.waitFor(() =>
+      expect(controller.getPendingSessions()).toHaveLength(1),
+    );
+
+    await controller.deactivate();
+
+    await expect(
+      controller.approveSession({
+        sessionId: SESSION_ID,
+        approvedScopes: ["workspace.read", "agent.launch"],
+      }),
+    ).rejects.toThrow("REMOTE_SESSION_NOT_PENDING");
+    expect(mocks.approveRemoteSession).not.toHaveBeenCalled();
   });
 });
