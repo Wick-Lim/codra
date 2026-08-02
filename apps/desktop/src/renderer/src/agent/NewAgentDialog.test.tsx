@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -248,6 +248,7 @@ describe("NewAgentDialog", () => {
         prompt: "Fix the auth callback",
       },
       "/workspace/auth",
+      { kind: "local" },
     );
   });
 
@@ -367,6 +368,7 @@ describe("NewAgentDialog", () => {
         prompt: "Review this workspace",
       },
       "/workspace/codra",
+      { kind: "local" },
     );
   });
 
@@ -405,6 +407,78 @@ describe("NewAgentDialog", () => {
         prompt: "Inspect this repository",
       },
       "/workspace/codra",
+      { kind: "local" },
+    );
+  });
+
+  it("preserves the prompt while choosing a remote device and workspace", async () => {
+    const remoteTarget = {
+      target: {
+        kind: "remote" as const,
+        deviceId: "40c77568-ae29-4af2-a57e-453ffc248a7b",
+        displayName: "Studio Mac",
+      },
+      state: "connected" as const,
+    };
+    const onTargetChange = vi.fn();
+    const onStart = vi.fn();
+    render(
+      <NewAgentDialog
+        open
+        agents={agents}
+        targets={[
+          { target: { kind: "local" }, state: "connected" },
+          remoteTarget,
+        ]}
+        initialCwd="/workspace/codra"
+        onClose={vi.fn()}
+        onStart={onStart}
+        onChooseCwd={cancelCwdSelection}
+        onTargetChange={onTargetChange}
+        workspaceRoots={vi
+          .fn()
+          .mockResolvedValue([{ path: "/Users/remote", label: "Home" }])}
+        workspaceList={vi.fn().mockResolvedValue({
+          path: "/Users/remote",
+          label: "remote",
+          breadcrumbs: [{ path: "/Users/remote", label: "Home" }],
+          entries: [],
+        })}
+        workspaceValidate={vi.fn().mockResolvedValue({
+          path: "/Users/remote",
+          label: "remote",
+        })}
+      />,
+    );
+
+    const prompt = screen.getByRole("textbox", { name: "First prompt" });
+    await userEvent.type(prompt, "Inspect the remote checkout");
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Device" }),
+      `remote:${remoteTarget.target.deviceId}`,
+    );
+    await waitFor(() =>
+      expect(onTargetChange).toHaveBeenCalledWith(remoteTarget),
+    );
+    expect(prompt).toHaveValue("Inspect the remote checkout");
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: /Working directory on Studio Mac:/u,
+      }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Home" }));
+    await userEvent.click(screen.getByRole("button", { name: "Use remote" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
+
+    expect(onStart).toHaveBeenCalledWith(
+      {
+        kind: "codex",
+        yolo: false,
+        prompt: "Inspect the remote checkout",
+      },
+      "/Users/remote",
+      remoteTarget.target,
     );
   });
 

@@ -24,6 +24,12 @@ import { startSingleInstanceApplication } from "./single-instance";
 import { buildBrowserWindowOptions } from "./window-options";
 import { RemoteHostController } from "./remote/host-controller";
 import type { RemoteSession } from "@codra/protocol";
+import {
+  createNativePeerConnection,
+  type NativeDataChannelModule,
+} from "./remote/native-peer";
+import { ProxyTerminalRouter } from "./remote/proxy-terminal-router";
+import { WorkspaceService } from "./remote/workspace-service";
 
 let mainWindow: BrowserWindow | undefined;
 let rendererUrlPolicy: RendererUrlPolicy | undefined;
@@ -98,6 +104,12 @@ async function startPrimaryInstance(): Promise<void> {
   const remoteHost = new RemoteHostController({
     userDataPath: app.getPath("userData"),
     reportError: (error) => console.error("Remote host error", error),
+    createPeer: (peerName, iceServers) =>
+      createNativePeerConnection(
+        requireFromMain("node-datachannel") as NativeDataChannelModule,
+        peerName,
+        iceServers,
+      ),
     onPendingSession: (session: RemoteSession) => {
       void dialog
         .showMessageBox({
@@ -150,6 +162,20 @@ async function startPrimaryInstance(): Promise<void> {
       ),
     createManager: (ptyFactory, repository, outputStore) =>
       new TerminalManager(ptyFactory, repository, outputStore),
+    configureTerminalServices: (manager, outputStore) => {
+      const readFromCursor = outputStore.readFromCursor?.bind(outputStore);
+      if (!readFromCursor) {
+        throw new Error("TERMINAL_CURSOR_OUTPUT_UNAVAILABLE");
+      }
+      remoteHost.configureHostServices({
+        workspace: new WorkspaceService(),
+        listRuntimes: () => listAgentRuntimes(agentRuntimeDependencies),
+        manager,
+        outputStore: { readFromCursor },
+      });
+    },
+    createTerminalRouter: (manager) =>
+      new ProxyTerminalRouter(manager, (target) => remoteHost.peerFor(target)),
     registerIpc: (options) =>
       registerTerminalIpc({
         ...options,

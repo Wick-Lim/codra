@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   IPC_CHANNELS,
+  type AgentExecutionTarget,
+  type AgentLaunchTarget,
   type RemoteAccountStatus,
   type RemoteHostStatus,
 } from "@codra/protocol";
@@ -47,6 +49,11 @@ function controller() {
   let accountStatus: RemoteAccountStatus = { state: "signed_out" };
   let listener: ((next: RemoteHostStatus) => void) | undefined;
   let accountListener: ((next: RemoteAccountStatus) => void) | undefined;
+  let targetsListener: ((next: AgentLaunchTarget[]) => void) | undefined;
+  const localTarget: AgentLaunchTarget = {
+    target: { kind: "local" },
+    state: "connected",
+  };
   return {
     getStatus: () => status,
     getAccountStatus: () => accountStatus,
@@ -90,9 +97,38 @@ function controller() {
         accountListener = undefined;
       };
     },
+    listTargets: vi.fn(async () => [localTarget]),
+    connectTarget: vi.fn(async () => localTarget),
+    listRuntimesForTarget: vi.fn(async () => []),
+    workspaceRoots: vi.fn(async () => [
+      { path: "/Users/codra", label: "Home" },
+    ]),
+    workspaceList: vi.fn(
+      async (...parameters: [AgentExecutionTarget, string]) => ({
+        path: parameters[1],
+        label: "codra",
+        breadcrumbs: [{ path: "/Users/codra", label: "Home" }],
+        entries: [],
+      }),
+    ),
+    workspaceValidate: vi.fn(
+      async (...parameters: [AgentExecutionTarget, string]) => ({
+        path: parameters[1],
+        label: "codra",
+      }),
+    ),
+    onTargetsChanged: (next: (value: AgentLaunchTarget[]) => void) => {
+      targetsListener = next;
+      return () => {
+        targetsListener = undefined;
+      };
+    },
     emit(next: RemoteHostStatus) {
       status = next;
       listener?.(next);
+    },
+    emitTargets(next: AgentLaunchTarget[]) {
+      targetsListener?.(next);
     },
   };
 }
@@ -170,6 +206,56 @@ describe("registerRemoteIpc", () => {
 
     cleanup();
     expect(ipc.handlers.size).toBe(0);
+  });
+
+  it("validates and routes target, runtime, and workspace requests", async () => {
+    const ipc = new FakeIpc();
+    const host = controller();
+    const client = sender();
+    registerRemoteIpc({
+      ipc,
+      controller: host,
+      windows: () => [client.window],
+      isTrustedRendererUrl: (url) => url.startsWith("file:///trusted/"),
+    });
+    const local = { kind: "local" as const };
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentTargets)?.(client.event),
+    ).resolves.toEqual([{ target: local, state: "connected" }]);
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentTargetRuntimes)?.(client.event, {
+        target: local,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentWorkspaceRoots)?.(client.event, {
+        target: local,
+      }),
+    ).resolves.toEqual([{ path: "/Users/codra", label: "Home" }]);
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentWorkspaceList)?.(client.event, {
+        target: local,
+        path: "/Users/codra",
+      }),
+    ).resolves.toMatchObject({ path: "/Users/codra" });
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentWorkspaceValidate)?.(client.event, {
+        target: local,
+        path: "/Users/codra",
+      }),
+    ).resolves.toEqual({ path: "/Users/codra", label: "codra" });
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.agentWorkspaceList)?.(client.event, {
+        target: local,
+        path: "",
+      }),
+    ).rejects.toThrow();
+    host.emitTargets([{ target: local, state: "connected" }]);
+    expect(client.sends.at(-1)).toEqual({
+      channel: IPC_CHANNELS.agentTargetsChanged,
+      payload: [{ target: local, state: "connected" }],
+    });
   });
 
   it("rejects an untrusted renderer before invoking the controller", async () => {

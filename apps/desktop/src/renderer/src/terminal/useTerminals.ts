@@ -1,4 +1,5 @@
 import type {
+  AgentExecutionTarget,
   AgentLaunchRequest,
   AgentSetupRequest,
   AgentSetupResult,
@@ -14,7 +15,11 @@ export interface UseTerminalsResult {
   defaultCwd: string;
   chooseCwd(defaultPath: string): Promise<string | null>;
   createTerminal(): Promise<void>;
-  createAgent(request: AgentLaunchRequest, cwd: string): Promise<void>;
+  createAgent(
+    request: AgentLaunchRequest,
+    cwd: string,
+    target: AgentExecutionTarget,
+  ): Promise<void>;
   setupAgent(request: AgentSetupRequest): Promise<AgentSetupResult>;
   selectTerminal(terminalId: string): void;
   closeTerminal(terminalId: string): Promise<void>;
@@ -113,12 +118,17 @@ export function useTerminals(
   );
 
   const createAgent = useCallback(
-    async (agent: AgentLaunchRequest, cwd: string) => {
+    async (
+      agent: AgentLaunchRequest,
+      cwd: string,
+      target: AgentExecutionTarget,
+    ) => {
       const descriptor = await api.terminal.create({
         cols: 100,
         rows: 30,
         cwd,
         agent,
+        target,
       });
       setTerminals((current) => replaceDescriptor(current, descriptor));
       setActiveTerminalId(descriptor.id);

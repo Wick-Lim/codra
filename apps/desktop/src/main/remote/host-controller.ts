@@ -2,6 +2,7 @@ import { httpsCallable } from "firebase/functions";
 import type { FirebaseRuntime } from "@codra/firebase";
 import {
   approveRemoteSession,
+  listHostDevices as listFirebaseHostDevices,
   rejectRemoteSession,
   registerDevice,
   subscribePendingSessions,
@@ -9,10 +10,17 @@ import {
 import {
   RemoteDeviceSchema,
   signCanonicalPayload,
+  type AgentExecutionTarget,
+  type AgentLaunchTarget,
+  type AgentRuntime,
   type RemoteAccountStatus,
+  type RemoteAgentExecutionTarget,
   type RemoteAuthProvider,
   type RemoteHostStatus,
   type RemoteSession,
+  type WorkspaceDirectoryPage,
+  type WorkspaceRoot,
+  type WorkspaceSelection,
 } from "@codra/protocol";
 import { signInWithCustomToken, signOut } from "firebase/auth";
 import { loadOrCreateHostIdentity, type HostIdentity } from "./host-identity";
@@ -28,6 +36,16 @@ import {
 } from "./remote-state";
 import { shouldRetryDesktopLoginAsRegister } from "./desktop-login";
 import type { DesktopAuthParentWindowLike } from "./auth-window";
+import type { IceServerInput } from "@codra/webrtc";
+import type { PeerConnectionPort } from "./peer-session";
+import {
+  DesktopPeerConnector,
+  type RemoteHostServices,
+} from "./desktop-peer-connector";
+import {
+  RemoteAgentClient,
+  type RemoteAgentChannelClient,
+} from "./remote-agent-client";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -35,12 +53,19 @@ export interface RemoteHostControllerOptions {
   userDataPath: string;
   reportError(error: unknown): void;
   onPendingSession?(session: RemoteSession): void;
+  createPeer?(
+    peerName: string,
+    iceServers: readonly IceServerInput[],
+  ): PeerConnectionPort;
 }
 
 export class RemoteHostController {
   private runtime: FirebaseRuntime | undefined;
   private deviceRuntime: FirebaseRuntime | undefined;
   private identity: HostIdentity | undefined;
+  private connector: DesktopPeerConnector | undefined;
+  private hostServices: RemoteHostServices | undefined;
+  private readonly remoteClient: RemoteAgentClient;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private startPromise: Promise<void> | undefined;
   private authPromise: Promise<void> | undefined;
@@ -58,7 +83,90 @@ export class RemoteHostController {
     (status: RemoteAccountStatus) => void
   >();
 
-  constructor(private readonly options: RemoteHostControllerOptions) {}
+  constructor(private readonly options: RemoteHostControllerOptions) {
+    this.remoteClient = new RemoteAgentClient({
+      enabled: () =>
+        this.status.state === "online" &&
+        this.deviceRuntime?.auth.currentUser !== null &&
+        this.connector !== undefined,
+      currentDeviceId: () => this.identity?.deviceId,
+      listDevices: async () => {
+        if (!this.deviceRuntime) return [];
+        return listFirebaseHostDevices(this.deviceRuntime.functions);
+      },
+      connect: (device, update) => {
+        if (!this.connector) throw new Error("REMOTE_HOST_NOT_STARTED");
+        return this.connector.connectClient(
+          RemoteDeviceSchema.parse(device),
+          update,
+        );
+      },
+    });
+  }
+
+  configureHostServices(services: RemoteHostServices): void {
+    this.hostServices = services;
+  }
+
+  listTargets(): Promise<AgentLaunchTarget[]> {
+    return this.remoteClient.refreshTargets();
+  }
+
+  connectTarget(
+    target: RemoteAgentExecutionTarget,
+  ): Promise<AgentLaunchTarget> {
+    return this.remoteClient.connectTarget(target);
+  }
+
+  onTargetsChanged(
+    listener: (targets: AgentLaunchTarget[]) => void,
+  ): () => void {
+    return this.remoteClient.onTargetsChanged(listener);
+  }
+
+  async listRuntimesForTarget(
+    target: AgentExecutionTarget,
+  ): Promise<AgentRuntime[]> {
+    if (target.kind === "local") {
+      if (!this.hostServices) throw new Error("TERMINAL_SERVICES_UNAVAILABLE");
+      return this.hostServices.listRuntimes();
+    }
+    return this.remoteClient.peerFor(target).runtimes();
+  }
+
+  async workspaceRoots(target: AgentExecutionTarget): Promise<WorkspaceRoot[]> {
+    if (target.kind === "local") {
+      if (!this.hostServices) throw new Error("TERMINAL_SERVICES_UNAVAILABLE");
+      return this.hostServices.workspace.roots();
+    }
+    return this.remoteClient.peerFor(target).workspaceRoots();
+  }
+
+  async workspaceList(
+    target: AgentExecutionTarget,
+    path: string,
+  ): Promise<WorkspaceDirectoryPage> {
+    if (target.kind === "local") {
+      if (!this.hostServices) throw new Error("TERMINAL_SERVICES_UNAVAILABLE");
+      return this.hostServices.workspace.list(path);
+    }
+    return this.remoteClient.peerFor(target).workspaceList(path);
+  }
+
+  async workspaceValidate(
+    target: AgentExecutionTarget,
+    path: string,
+  ): Promise<WorkspaceSelection> {
+    if (target.kind === "local") {
+      if (!this.hostServices) throw new Error("TERMINAL_SERVICES_UNAVAILABLE");
+      return this.hostServices.workspace.validate(path);
+    }
+    return this.remoteClient.peerFor(target).workspaceValidate(path);
+  }
+
+  peerFor(target: RemoteAgentExecutionTarget): RemoteAgentChannelClient {
+    return this.remoteClient.peerFor(target);
+  }
 
   getStatus(): RemoteHostStatus {
     return this.status;
@@ -216,6 +324,9 @@ export class RemoteHostController {
   }
 
   private async stopHostResources(): Promise<void> {
+    await this.remoteClient.disconnectAll();
+    this.connector?.close();
+    this.connector = undefined;
     this.unsubscribePending?.();
     this.unsubscribePending = undefined;
     this.promptedSessions.clear();
@@ -284,6 +395,17 @@ export class RemoteHostController {
       this.runtime = accountRuntime;
       this.deviceRuntime = deviceRuntime;
       this.identity = identity;
+      if (!this.options.createPeer) {
+        throw new Error("REMOTE_NATIVE_PEER_UNAVAILABLE");
+      }
+      this.connector = new DesktopPeerConnector({
+        runtime: deviceRuntime,
+        identity,
+        device,
+        createPeer: this.options.createPeer,
+        hostServices: () => this.hostServices,
+        reportError: this.options.reportError,
+      });
       this.heartbeatTimer = setInterval(() => {
         void this.heartbeat().catch((error) => this.options.reportError(error));
       }, HEARTBEAT_INTERVAL_MS);
@@ -310,6 +432,9 @@ export class RemoteHostController {
         },
       });
       this.publishStatus({ state: "online" });
+      void this.remoteClient
+        .refreshTargets()
+        .catch((error) => this.options.reportError(error));
     } catch (error) {
       await this.stopHostResources();
       throw error;
@@ -353,6 +478,10 @@ export class RemoteHostController {
       approvalSignature: signature,
     });
     this.promptedSessions.delete(session.sessionId);
+    if (!this.connector) throw new Error("REMOTE_HOST_NOT_STARTED");
+    void this.connector
+      .acceptHostSession(result)
+      .catch((error) => this.options.reportError(error));
     return result;
   }
 

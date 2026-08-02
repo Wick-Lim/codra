@@ -30,9 +30,9 @@ function createDesktopApiFake() {
   const api: CodraDesktopApi = {
     agents: {
       list: vi.fn().mockResolvedValue([]),
-      targets: vi.fn().mockResolvedValue([
-        { target: { kind: "local" }, state: "connected" },
-      ]),
+      targets: vi
+        .fn()
+        .mockResolvedValue([{ target: { kind: "local" }, state: "connected" }]),
       connectTarget: vi.fn(),
       listForTarget: vi.fn().mockResolvedValue([]),
       workspaceRoots: vi.fn().mockResolvedValue([]),
@@ -185,6 +185,11 @@ describe("useTerminals", () => {
           prompt: "Fix the failing tests",
         },
         "/workspace/services/api",
+        {
+          kind: "remote",
+          deviceId: "40c77568-ae29-4af2-a57e-453ffc248a7b",
+          displayName: "Studio Mac",
+        },
       );
     });
 
@@ -196,6 +201,11 @@ describe("useTerminals", () => {
         kind: "codex",
         yolo: true,
         prompt: "Fix the failing tests",
+      },
+      target: {
+        kind: "remote",
+        deviceId: "40c77568-ae29-4af2-a57e-453ffc248a7b",
+        displayName: "Studio Mac",
       },
     });
     expect(result.current.activeTerminal?.title).toBe("Codex");

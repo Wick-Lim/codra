@@ -941,6 +941,7 @@ describe("App terminal workspace", () => {
           model: "pro",
           prompt: "Fix the desktop login flow",
         },
+        target: { kind: "local" },
       }),
     );
     expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
@@ -950,6 +951,88 @@ describe("App terminal workspace", () => {
       expect(api.terminal.create).toHaveBeenLastCalledWith({
         cols: 100,
         rows: 30,
+      }),
+    );
+  });
+
+  it("connects a remote target, browses its workspace, and routes the launch there", async () => {
+    const api = createPaneApi();
+    const remoteTarget = {
+      kind: "remote" as const,
+      deviceId: "40c77568-ae29-4af2-a57e-453ffc248a7b",
+      displayName: "Studio Mac",
+    };
+    const runtimes = await api.agents.list();
+    vi.mocked(api.agents.targets).mockResolvedValue([
+      { target: { kind: "local" }, state: "connected" },
+      { target: remoteTarget, state: "available" },
+    ]);
+    vi.mocked(api.agents.connectTarget).mockResolvedValue({
+      target: remoteTarget,
+      state: "connected",
+    });
+    vi.mocked(api.agents.listForTarget).mockResolvedValue(runtimes);
+    vi.mocked(api.agents.workspaceRoots).mockResolvedValue([
+      { path: "/Users/remote", label: "Home" },
+    ]);
+    vi.mocked(api.agents.workspaceList).mockResolvedValue({
+      path: "/Users/remote",
+      label: "remote",
+      breadcrumbs: [{ path: "/Users/remote", label: "Home" }],
+      entries: [],
+    });
+    vi.mocked(api.agents.workspaceValidate).mockResolvedValue({
+      path: "/Users/remote",
+      label: "remote",
+    });
+    vi.mocked(api.terminal.create).mockResolvedValue({
+      ...runningTerminal,
+      title: "Codex · Studio Mac",
+      cwd: "/Users/remote",
+      origin: remoteTarget,
+    });
+    Object.defineProperty(window, "codra", {
+      configurable: true,
+      value: api,
+    });
+
+    render(React.createElement(App));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "New agent" }),
+    );
+    const prompt = await screen.findByRole("textbox", { name: "First prompt" });
+    await userEvent.type(prompt, "Fix the remote build");
+    await waitFor(() => expect(api.agents.targets).toHaveBeenCalled());
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Device" }),
+      `remote:${remoteTarget.deviceId}`,
+    );
+
+    await waitFor(() =>
+      expect(api.agents.connectTarget).toHaveBeenCalledWith(remoteTarget),
+    );
+    expect(api.agents.listForTarget).toHaveBeenCalledWith(remoteTarget);
+    expect(prompt).toHaveValue("Fix the remote build");
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /Working directory on Studio Mac/u,
+      }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Home" }));
+    await userEvent.click(screen.getByRole("button", { name: "Use remote" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
+
+    await waitFor(() =>
+      expect(api.terminal.create).toHaveBeenCalledWith({
+        cols: 100,
+        rows: 30,
+        cwd: "/Users/remote",
+        agent: {
+          kind: "codex",
+          yolo: false,
+          prompt: "Fix the remote build",
+        },
+        target: remoteTarget,
       }),
     );
   });

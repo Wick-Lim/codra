@@ -1,6 +1,8 @@
 import React from "react";
 import type {
+  AgentExecutionTarget,
   AgentLaunchRequest,
+  AgentLaunchTarget,
   AgentRuntime,
   AgentSetupRequest,
   RemoteAccountStatus,
@@ -40,6 +42,9 @@ export default function App() {
   >("remote");
   const [agentDialogOpen, setAgentDialogOpen] = React.useState(false);
   const [agentRuntimes, setAgentRuntimes] = React.useState<AgentRuntime[]>([]);
+  const [agentTargets, setAgentTargets] = React.useState<AgentLaunchTarget[]>([
+    { target: { kind: "local" }, state: "connected" },
+  ]);
   const [agentStarting, setAgentStarting] = React.useState(false);
   const [agentError, setAgentError] = React.useState<string>();
   const [agentDiscoveryError, setAgentDiscoveryError] =
@@ -49,6 +54,7 @@ export default function App() {
     React.useState<AgentSetupRequest["kind"]>();
   const [agentSetupTerminalId, setAgentSetupTerminalId] =
     React.useState<string>();
+  const agentTargetGeneration = React.useRef(0);
 
   const refreshAgentRuntimes = React.useCallback(async () => {
     try {
@@ -59,10 +65,36 @@ export default function App() {
     }
   }, []);
 
+  const refreshAgentTargets = React.useCallback(async () => {
+    try {
+      setAgentTargets(await window.codra.agents.targets());
+    } catch {
+      setAgentTargets([{ target: { kind: "local" }, state: "connected" }]);
+    }
+  }, []);
+
+  const remoteWorkspaceRoots = React.useCallback(
+    (target: Extract<AgentExecutionTarget, { kind: "remote" }>) =>
+      window.codra.agents.workspaceRoots(target),
+    [],
+  );
+  const remoteWorkspaceList = React.useCallback(
+    (target: Extract<AgentExecutionTarget, { kind: "remote" }>, path: string) =>
+      window.codra.agents.workspaceList(target, path),
+    [],
+  );
+  const remoteWorkspaceValidate = React.useCallback(
+    (target: Extract<AgentExecutionTarget, { kind: "remote" }>, path: string) =>
+      window.codra.agents.workspaceValidate(target, path),
+    [],
+  );
+
   React.useEffect(() => {
     const stopListening = window.codra.remote.onStateChanged(setRemoteStatus);
     const stopListeningAccount =
       window.codra.remote.onAuthStateChanged(setAccountStatus);
+    const stopListeningTargets =
+      window.codra.agents.onTargetsChanged(setAgentTargets);
     void window.codra.remote
       .getState()
       .then(setRemoteStatus)
@@ -85,8 +117,9 @@ export default function App() {
     return () => {
       stopListening();
       stopListeningAccount();
+      stopListeningTargets();
     };
-  }, [refreshAgentRuntimes]);
+  }, [refreshAgentRuntimes, refreshAgentTargets]);
 
   React.useEffect(() => {
     if (!agentSetupTerminalId) return;
@@ -103,6 +136,7 @@ export default function App() {
     setAgentDialogOpen(true);
     setAgentError(undefined);
     void refreshAgentRuntimes();
+    void refreshAgentTargets();
   }
 
   function openSettings(section: "remote" | "agents"): void {
@@ -118,11 +152,12 @@ export default function App() {
   async function startAgent(
     request: AgentLaunchRequest,
     cwd: string,
+    target: AgentExecutionTarget,
   ): Promise<void> {
     setAgentStarting(true);
     setAgentError(undefined);
     try {
-      await createAgent(request, cwd);
+      await createAgent(request, cwd, target);
       setAgentDialogOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -133,6 +168,39 @@ export default function App() {
       );
     } finally {
       setAgentStarting(false);
+    }
+  }
+
+  async function changeAgentTarget(
+    requested: AgentLaunchTarget,
+  ): Promise<void> {
+    const generation = ++agentTargetGeneration.current;
+    setAgentError(undefined);
+    try {
+      const connected =
+        requested.target.kind === "remote" && requested.state !== "connected"
+          ? await window.codra.agents.connectTarget(requested.target)
+          : requested;
+      if (generation !== agentTargetGeneration.current) return;
+      setAgentTargets((current) =>
+        current.map((candidate) =>
+          candidate.target.kind === "remote" &&
+          connected.target.kind === "remote" &&
+          candidate.target.deviceId === connected.target.deviceId
+            ? connected
+            : candidate,
+        ),
+      );
+      const runtimes = await window.codra.agents.listForTarget(
+        connected.target,
+      );
+      if (generation === agentTargetGeneration.current) {
+        setAgentRuntimes(runtimes);
+      }
+    } catch (error) {
+      if (generation !== agentTargetGeneration.current) return;
+      setAgentError("The selected device could not be connected.");
+      throw error;
     }
   }
 
@@ -322,14 +390,21 @@ export default function App() {
       <NewAgentDialog
         open={agentDialogOpen}
         agents={agentRuntimes}
+        targets={agentTargets}
         initialCwd={activeTerminal?.cwd ?? defaultCwd}
         busy={agentStarting}
         error={agentError ?? agentDiscoveryError}
         onClose={() => {
           if (!agentStarting) setAgentDialogOpen(false);
         }}
-        onStart={(request, cwd) => void startAgent(request, cwd)}
+        onStart={(request, cwd, target) =>
+          void startAgent(request, cwd, target)
+        }
         onChooseCwd={chooseAgentCwd}
+        onTargetChange={changeAgentTarget}
+        workspaceRoots={remoteWorkspaceRoots}
+        workspaceList={remoteWorkspaceList}
+        workspaceValidate={remoteWorkspaceValidate}
         onOpenAgentSettings={() => openSettings("agents")}
       />
       <SettingsDialog

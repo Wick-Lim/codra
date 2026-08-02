@@ -1,11 +1,28 @@
 import {
+  AgentLaunchTargetSchema,
+  AgentRuntimeSchema,
+  AgentTargetConnectRequestSchema,
+  AgentTargetRuntimeRequestSchema,
   IPC_CHANNELS,
   RemoteAccountStatusSchema,
   RemoteAuthProviderSchema,
   RemoteHostStatusSchema,
+  WorkspaceDirectoryPageSchema,
+  WorkspaceListRequestSchema,
+  WorkspaceRootSchema,
+  WorkspaceSelectionSchema,
+  WorkspaceTargetRequestSchema,
+  WorkspaceValidateRequestSchema,
+  type AgentExecutionTarget,
+  type AgentLaunchTarget,
+  type AgentRuntime,
   type RemoteAccountStatus,
   type RemoteAuthProvider,
   type RemoteHostStatus,
+  type RemoteAgentExecutionTarget,
+  type WorkspaceDirectoryPage,
+  type WorkspaceRoot,
+  type WorkspaceSelection,
 } from "@codra/protocol";
 import {
   assertAuthorizedRenderer,
@@ -29,6 +46,21 @@ export interface RemoteHostControllerPort {
   onStatusChanged(listener: (status: RemoteHostStatus) => void): () => void;
   onAccountStatusChanged(
     listener: (status: RemoteAccountStatus) => void,
+  ): () => void;
+  listTargets(): Promise<AgentLaunchTarget[]>;
+  connectTarget(target: RemoteAgentExecutionTarget): Promise<AgentLaunchTarget>;
+  listRuntimesForTarget(target: AgentExecutionTarget): Promise<AgentRuntime[]>;
+  workspaceRoots(target: AgentExecutionTarget): Promise<WorkspaceRoot[]>;
+  workspaceList(
+    target: AgentExecutionTarget,
+    path: string,
+  ): Promise<WorkspaceDirectoryPage>;
+  workspaceValidate(
+    target: AgentExecutionTarget,
+    path: string,
+  ): Promise<WorkspaceSelection>;
+  onTargetsChanged(
+    listener: (targets: AgentLaunchTarget[]) => void,
   ): () => void;
 }
 
@@ -92,6 +124,31 @@ function sendAccountStatusToLiveWindows(
   }
 }
 
+function sendTargetsToLiveWindows(
+  windows: () => readonly BrowserWindowLike[],
+  isTrustedRendererUrl: (url: string) => boolean,
+  targets: AgentLaunchTarget[],
+  reportError: (error: unknown) => void,
+): void {
+  const payload = AgentLaunchTargetSchema.array().parse(targets);
+  for (const window of windows()) {
+    try {
+      if (window.isDestroyed?.()) continue;
+      const webContents = window.webContents;
+      if (!webContents || webContents.isDestroyed()) continue;
+      if (
+        !isTrustedRendererUrl(webContents.getURL()) ||
+        !isTrustedRendererUrl(webContents.mainFrame.url)
+      ) {
+        continue;
+      }
+      webContents.send(IPC_CHANNELS.agentTargetsChanged, payload);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+}
+
 export function registerRemoteIpc({
   ipc,
   controller,
@@ -102,6 +159,66 @@ export function registerRemoteIpc({
   const authorize = (event: unknown): RemoteIpcWindowLike =>
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   const registrations: readonly [string, RemoteIpcHandler][] = [
+    [
+      IPC_CHANNELS.agentTargets,
+      async (event) => {
+        authorize(event);
+        return AgentLaunchTargetSchema.array().parse(
+          await controller.listTargets(),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.agentConnectTarget,
+      async (event, rawRequest) => {
+        authorize(event);
+        const { target } = AgentTargetConnectRequestSchema.parse(rawRequest);
+        return AgentLaunchTargetSchema.parse(
+          await controller.connectTarget(target),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.agentTargetRuntimes,
+      async (event, rawRequest) => {
+        authorize(event);
+        const { target } = AgentTargetRuntimeRequestSchema.parse(rawRequest);
+        return AgentRuntimeSchema.array().parse(
+          await controller.listRuntimesForTarget(target),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.agentWorkspaceRoots,
+      async (event, rawRequest) => {
+        authorize(event);
+        const { target } = WorkspaceTargetRequestSchema.parse(rawRequest);
+        return WorkspaceRootSchema.array().parse(
+          await controller.workspaceRoots(target),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.agentWorkspaceList,
+      async (event, rawRequest) => {
+        authorize(event);
+        const { target, path } = WorkspaceListRequestSchema.parse(rawRequest);
+        return WorkspaceDirectoryPageSchema.parse(
+          await controller.workspaceList(target, path),
+        );
+      },
+    ],
+    [
+      IPC_CHANNELS.agentWorkspaceValidate,
+      async (event, rawRequest) => {
+        authorize(event);
+        const { target, path } =
+          WorkspaceValidateRequestSchema.parse(rawRequest);
+        return WorkspaceSelectionSchema.parse(
+          await controller.workspaceValidate(target, path),
+        );
+      },
+    ],
     [
       IPC_CHANNELS.remoteGetState,
       (event) => {
@@ -169,9 +286,18 @@ export function registerRemoteIpc({
       ),
     );
     const previousUnsubscribe = unsubscribe;
+    const unsubscribeTargets = controller.onTargetsChanged((targets) =>
+      sendTargetsToLiveWindows(
+        windows,
+        isTrustedRendererUrl,
+        targets,
+        reportError,
+      ),
+    );
     unsubscribe = () => {
       previousUnsubscribe?.();
       unsubscribeAccount();
+      unsubscribeTargets();
     };
   } catch (error) {
     for (const channel of registeredChannels) ipc.removeHandler(channel);

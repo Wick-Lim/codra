@@ -1587,6 +1587,181 @@ button:focus-visible,
   opacity: 0.42;
 }
 
+.remote-workspace-dialog {
+  width: min(590px, calc(100vw - 48px));
+}
+
+.remote-workspace-dialog .modal-surface {
+  overflow: hidden;
+}
+
+.remote-workspace-dialog .modal-body {
+  padding: 0;
+}
+
+.remote-workspace-shell {
+  display: grid;
+  min-height: 360px;
+  grid-template-rows: auto minmax(220px, 1fr) auto auto;
+}
+
+.remote-workspace-breadcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  padding: 10px 16px;
+  overflow-x: auto;
+  color: var(--muted);
+  background: var(--deck);
+  border-bottom: 1px solid var(--steel-soft);
+  scrollbar-width: thin;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.remote-workspace-breadcrumbs button {
+  padding: 3px 5px;
+  color: var(--fog-soft);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.remote-workspace-breadcrumbs button:not(:disabled):hover {
+  color: var(--signal);
+  background: rgb(145 167 255 / 8%);
+}
+
+.remote-workspace-breadcrumbs button[aria-current="location"] {
+  color: var(--fog);
+  opacity: 1;
+}
+
+.remote-workspace-browser {
+  min-height: 250px;
+  max-height: min(390px, calc(100vh - 330px));
+  padding: 10px;
+  overflow: auto;
+  background: linear-gradient(rgb(255 255 255 / 1%), transparent 1px), #0d121b;
+  background-size: 100% 32px;
+  scrollbar-color: var(--steel) transparent;
+}
+
+.remote-workspace-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-workspace-list button {
+  display: grid;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  grid-template-columns: 17px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  color: var(--fog-soft);
+  text-align: left;
+  background: rgb(17 23 34 / 86%);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+}
+
+.remote-workspace-list button:not(:disabled):hover,
+.remote-workspace-list button:focus-visible {
+  color: var(--fog);
+  background: var(--bulkhead);
+  border-color: color-mix(in srgb, var(--signal) 52%, var(--steel));
+}
+
+.remote-workspace-list svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--signal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.15;
+}
+
+.remote-workspace-roots button {
+  min-height: 42px;
+  background: var(--deck);
+  border-color: var(--steel-soft);
+}
+
+.remote-workspace-state {
+  display: grid;
+  min-height: 220px;
+  margin: 0;
+  place-items: center;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+}
+
+.remote-workspace-shell > .dialog-error {
+  margin: 0 14px 10px;
+}
+
+.remote-workspace-actions {
+  display: grid;
+  padding: 12px 14px 14px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  background: var(--bulkhead-raised);
+  border-top: 1px solid var(--steel-soft);
+}
+
+.remote-workspace-actions > button {
+  min-height: 32px;
+  padding: 6px 12px;
+  color: var(--fog-soft);
+  background: var(--bulkhead);
+  border: 1px solid var(--steel);
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.remote-workspace-actions > .agent-start-button {
+  color: #0c1120;
+  background: var(--signal);
+  border-color: #a5b5ff;
+}
+
+.remote-workspace-current {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.remote-workspace-current span {
+  color: var(--muted-dim);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.remote-workspace-current strong {
+  overflow: hidden;
+  color: var(--fog-soft);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-dialog {
   width: min(760px, calc(100vw - 48px));
 }

@@ -44,6 +44,13 @@ export interface DesktopBootstrapOptions {
     repository: TerminalRepository,
     outputStore: TerminalOutputStore,
   ): DesktopBootstrapManager;
+  configureTerminalServices?(
+    manager: DesktopBootstrapManager,
+    outputStore: TerminalOutputStore,
+  ): void;
+  createTerminalRouter?(
+    manager: DesktopBootstrapManager,
+  ): DesktopBootstrapManager;
   registerIpc(options: RegisterTerminalIpcOptions): () => void;
   createLifecycle(options: DesktopLifecycleOptions): DesktopLifecycleInstance;
   createWindow(): void | Promise<void>;
@@ -84,11 +91,13 @@ export async function bootstrapDesktop(
     const outputStore = options.createOutputStore(
       join(options.userDataPath, "terminal-output"),
     );
-    manager = options.createManager(
+    const localManager = options.createManager(
       options.createPtyFactory(),
       repository,
       outputStore,
     );
+    options.configureTerminalServices?.(localManager, outputStore);
+    manager = options.createTerminalRouter?.(localManager) ?? localManager;
     const admission = new TerminalAdmissionGate();
     unregisterIpc = options.registerIpc({
       ipc: options.ipc,
