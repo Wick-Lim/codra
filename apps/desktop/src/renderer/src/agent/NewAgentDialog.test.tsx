@@ -30,6 +30,10 @@ const agents: AgentRuntime[] = [
       },
     ],
     installHint: "Install Codex CLI to use this runtime.",
+    setup: {
+      installMethod: "managed_npm",
+      authentication: "required",
+    },
   },
   {
     kind: "claude",
@@ -44,6 +48,10 @@ const agents: AgentRuntime[] = [
     ],
     models: [{ id: "sonnet", label: "Sonnet" }],
     installHint: "Install Claude Code to use this runtime.",
+    setup: {
+      installMethod: "managed_npm",
+      authentication: "required",
+    },
   },
   {
     kind: "gemini",
@@ -58,6 +66,10 @@ const agents: AgentRuntime[] = [
       { id: "pro", label: "Pro" },
     ],
     installHint: "Install @google/gemini-cli to use this runtime.",
+    setup: {
+      installMethod: "managed_npm",
+      authentication: "required",
+    },
   },
   {
     kind: "ollama",
@@ -75,6 +87,10 @@ const agents: AgentRuntime[] = [
       { id: "qwen3-coder:latest", label: "qwen3-coder:latest" },
     ],
     installHint: "Install Ollama and pull a model to use this runtime.",
+    setup: {
+      installMethod: "external",
+      authentication: "not_required",
+    },
   },
 ];
 

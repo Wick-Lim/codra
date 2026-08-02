@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -9,18 +9,29 @@ import type {
   AgentLaunchRequest,
   AgentModelOption,
   AgentRuntime,
+  AgentSetupRequest,
 } from "@codra/protocol";
 
 export interface AgentRuntimeDependencies {
   envPath: string;
   homeDirectory: string;
+  managedInstallDirectory: string;
+  electronExecutable: string;
+  npmCliPath: string;
+  setupRunnerPath: string;
   isExecutable(path: string): boolean;
-  runCommand(executable: string, args: readonly string[]): Promise<string>;
+  isNodeScript(path: string): boolean;
+  runCommand(
+    executable: string,
+    args: readonly string[],
+    env?: NodeJS.ProcessEnv,
+  ): Promise<string>;
 }
 
 export interface AgentCommand {
   executable: string;
   args: string[];
+  env?: NodeJS.ProcessEnv;
   title: string;
 }
 
@@ -33,6 +44,8 @@ interface AgentProfile {
   modelRequired: boolean;
   efforts: AgentEffortOption[];
   installHint: string;
+  installMethod: "managed_npm" | "external";
+  authentication: "required" | "not_required";
   models: AgentModelOption[];
 }
 
@@ -67,6 +80,8 @@ const AGENT_PROFILES: Record<AgentKind, AgentProfile> = {
     modelRequired: false,
     efforts: CODEX_EFFORTS,
     installHint: "Install Codex CLI to use this runtime.",
+    installMethod: "managed_npm",
+    authentication: "required",
     models: [],
   },
   claude: {
@@ -78,6 +93,8 @@ const AGENT_PROFILES: Record<AgentKind, AgentProfile> = {
     modelRequired: false,
     efforts: CLAUDE_EFFORTS,
     installHint: "Install Claude Code to use this runtime.",
+    installMethod: "managed_npm",
+    authentication: "required",
     models: [
       { id: "opus", label: "Opus" },
       { id: "sonnet", label: "Sonnet" },
@@ -93,6 +110,8 @@ const AGENT_PROFILES: Record<AgentKind, AgentProfile> = {
     modelRequired: false,
     efforts: [],
     installHint: "Install @google/gemini-cli to use this runtime.",
+    installMethod: "managed_npm",
+    authentication: "required",
     models: [
       { id: "auto", label: "Auto" },
       { id: "pro", label: "Pro" },
@@ -109,6 +128,8 @@ const AGENT_PROFILES: Record<AgentKind, AgentProfile> = {
     modelRequired: true,
     efforts: OLLAMA_EFFORTS,
     installHint: "Install Ollama and pull a model to use this runtime.",
+    installMethod: "external",
+    authentication: "not_required",
     models: [],
   },
 };
@@ -118,6 +139,10 @@ const execFileAsync = promisify(execFile);
 const defaultDependencies: AgentRuntimeDependencies = {
   envPath: process.env.PATH ?? "",
   homeDirectory: homedir(),
+  managedInstallDirectory: join(homedir(), ".codra", "agent-tools"),
+  electronExecutable: process.execPath,
+  npmCliPath: process.env.CODRA_NPM_CLI_PATH ?? "",
+  setupRunnerPath: join(__dirname, "agent-setup-runner.js"),
   isExecutable: (path) => {
     try {
       accessSync(path, constants.X_OK);
@@ -126,9 +151,19 @@ const defaultDependencies: AgentRuntimeDependencies = {
       return false;
     }
   },
-  runCommand: async (executable, args) => {
+  isNodeScript: (path) => {
+    try {
+      return readFileSync(path, { encoding: "utf8" })
+        .slice(0, 160)
+        .startsWith("#!/usr/bin/env node");
+    } catch {
+      return false;
+    }
+  },
+  runCommand: async (executable, args, env) => {
     const result = await execFileAsync(executable, [...args], {
       encoding: "utf8",
+      env: env ? { ...process.env, ...env } : process.env,
       maxBuffer: 5 * 1024 * 1024,
       timeout: 4_000,
       windowsHide: true,
@@ -153,7 +188,51 @@ function candidateExecutables(
     join("/usr/local/bin", executable),
     join("/usr/bin", executable),
   ];
-  return [...new Set([...pathCandidates, ...commonCandidates])];
+  const managedCandidate = managedAgentExecutablePath(
+    kind,
+    dependencies.managedInstallDirectory,
+  );
+  return [
+    ...new Set([...pathCandidates, managedCandidate, ...commonCandidates]),
+  ];
+}
+
+export function managedAgentExecutablePath(
+  kind: AgentKind,
+  installDirectory: string,
+): string {
+  return join(
+    installDirectory,
+    "node_modules",
+    ".bin",
+    AGENT_PROFILES[kind].executable,
+  );
+}
+
+export function managedAgentPackage(kind: AgentKind): string {
+  switch (kind) {
+    case "codex":
+      return "@openai/codex";
+    case "claude":
+      return "@anthropic-ai/claude-code";
+    case "gemini":
+      return "@google/gemini-cli";
+    case "ollama":
+      throw new Error("AGENT_SETUP_EXTERNAL_REQUIRED");
+  }
+}
+
+export function agentAuthenticationArgs(kind: AgentKind): string[] {
+  switch (kind) {
+    case "codex":
+      return ["login"];
+    case "claude":
+      return ["auth", "login"];
+    case "gemini":
+      return [];
+    case "ollama":
+      throw new Error("AGENT_SETUP_UNSUPPORTED");
+  }
 }
 
 function findAgentExecutable(
@@ -163,6 +242,31 @@ function findAgentExecutable(
   return candidateExecutables(kind, dependencies).find(
     dependencies.isExecutable,
   );
+}
+
+function commandForExecutable(
+  kind: AgentKind,
+  executable: string,
+  args: string[],
+  title: string,
+  dependencies: AgentRuntimeDependencies,
+): AgentCommand {
+  const managedExecutable = managedAgentExecutablePath(
+    kind,
+    dependencies.managedInstallDirectory,
+  );
+  if (
+    executable === managedExecutable &&
+    dependencies.isNodeScript(executable)
+  ) {
+    return {
+      executable: dependencies.electronExecutable,
+      args: [executable, ...args],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+      title,
+    };
+  }
+  return { executable, args, title };
 }
 
 export function agentTerminalTitle(kind: AgentKind, model?: string): string {
@@ -265,13 +369,35 @@ async function discoverModels(
   if (!executable) return AGENT_PROFILES[kind].models;
   try {
     if (kind === "codex") {
+      const command = commandForExecutable(
+        kind,
+        executable,
+        ["debug", "models"],
+        AGENT_PROFILES[kind].title,
+        dependencies,
+      );
       return parseCodexModels(
-        await dependencies.runCommand(executable, ["debug", "models"]),
+        await dependencies.runCommand(
+          command.executable,
+          command.args,
+          command.env,
+        ),
       );
     }
     if (kind === "ollama") {
+      const command = commandForExecutable(
+        kind,
+        executable,
+        ["list"],
+        AGENT_PROFILES[kind].title,
+        dependencies,
+      );
       return parseOllamaModels(
-        await dependencies.runCommand(executable, ["list"]),
+        await dependencies.runCommand(
+          command.executable,
+          command.args,
+          command.env,
+        ),
       );
     }
   } catch {
@@ -307,6 +433,10 @@ export async function listAgentRuntimes(
         efforts,
         models,
         installHint: profile.installHint,
+        setup: {
+          installMethod: profile.installMethod,
+          authentication: profile.authentication,
+        },
       };
     }),
   );
@@ -369,9 +499,56 @@ export function resolveAgentCommand(
       ];
       break;
   }
-  return {
+  return commandForExecutable(
+    launch.kind,
     executable,
     args,
-    title: agentTerminalTitle(launch.kind, launch.model),
-  };
+    agentTerminalTitle(launch.kind, launch.model),
+    dependencies,
+  );
+}
+
+export function resolveAgentSetupCommand(
+  request: AgentSetupRequest,
+  dependencies: AgentRuntimeDependencies = defaultDependencies,
+): AgentCommand {
+  const profile = AGENT_PROFILES[request.kind];
+  const title = `Setup ${profile.title}`;
+  if (request.kind === "ollama") {
+    if (request.action === "authenticate")
+      throw new Error("AGENT_SETUP_UNSUPPORTED");
+    throw new Error("AGENT_SETUP_EXTERNAL_REQUIRED");
+  }
+  if (request.action === "install") {
+    if (
+      !dependencies.electronExecutable ||
+      !dependencies.npmCliPath ||
+      !dependencies.setupRunnerPath
+    ) {
+      throw new Error("AGENT_INSTALLER_UNAVAILABLE");
+    }
+    return {
+      executable: dependencies.electronExecutable,
+      args: [
+        dependencies.setupRunnerPath,
+        request.kind,
+        dependencies.managedInstallDirectory,
+        dependencies.npmCliPath,
+      ],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        CODRA_AGENT_SETUP_RUNNER: "1",
+      },
+      title,
+    };
+  }
+  const executable = findAgentExecutable(request.kind, dependencies);
+  if (!executable) throw new Error("AGENT_CLI_NOT_FOUND");
+  return commandForExecutable(
+    request.kind,
+    executable,
+    agentAuthenticationArgs(request.kind),
+    title,
+    dependencies,
+  );
 }

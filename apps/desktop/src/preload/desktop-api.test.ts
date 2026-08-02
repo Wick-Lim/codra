@@ -159,6 +159,10 @@ describe("createDesktopApi", () => {
         efforts: [{ id: "high", label: "High" }],
         models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
         installHint: "Install Codex CLI to use this runtime.",
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       },
       {
         kind: "gemini",
@@ -170,6 +174,10 @@ describe("createDesktopApi", () => {
         efforts: [],
         models: [{ id: "auto", label: "Auto" }],
         installHint: "Install @google/gemini-cli to use this runtime.",
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       },
     ];
     const ipc = new FakeIpcRenderer(

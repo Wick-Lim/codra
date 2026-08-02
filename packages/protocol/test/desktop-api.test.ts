@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentSetupResultSchema,
   IPC_CHANNELS,
   RemoteAccountProfileSchema,
   RemoteAccountStateSchema,
@@ -55,6 +56,7 @@ describe("desktop remote IPC contract", () => {
 
   it("freezes remote action and event channel names", () => {
     expect(IPC_CHANNELS.agentList).toBe("codra:agent:list");
+    expect(IPC_CHANNELS.agentSetup).toBe("codra:agent:setup");
     expect(IPC_CHANNELS.remoteGetState).toBe("codra:remote:get-state");
     expect(IPC_CHANNELS.remoteLogin).toBe("codra:remote:login");
     expect(IPC_CHANNELS.remoteState).toBe("codra:remote:state");
@@ -63,5 +65,30 @@ describe("desktop remote IPC contract", () => {
     expect(IPC_CHANNELS.remoteActivate).toBe("codra:remote:activate");
     expect(IPC_CHANNELS.remoteDeactivate).toBe("codra:remote:deactivate");
     expect(IPC_CHANNELS.remoteLogout).toBe("codra:remote:logout");
+  });
+
+  it("accepts only bounded agent setup results", () => {
+    const terminal = {
+      id: "f4b0f73d-3406-48ec-a5c2-2cf290905e99",
+      title: "Setup Gemini",
+      cwd: "/workspace",
+      cols: 100,
+      rows: 30,
+      state: "running" as const,
+      createdAt: "2026-08-02T00:00:00.000Z",
+    };
+
+    expect(
+      AgentSetupResultSchema.parse({ kind: "terminal", terminal }),
+    ).toEqual({ kind: "terminal", terminal });
+    expect(AgentSetupResultSchema.parse({ kind: "external" })).toEqual({
+      kind: "external",
+    });
+    expect(() =>
+      AgentSetupResultSchema.parse({
+        kind: "external",
+        url: "https://attacker.example/install",
+      }),
+    ).toThrow();
   });
 });

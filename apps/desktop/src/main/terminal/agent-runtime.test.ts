@@ -2,17 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import {
   listAgentRuntimes,
   resolveAgentCommand,
+  resolveAgentSetupCommand,
   type AgentRuntimeDependencies,
 } from "./agent-runtime";
 
 function dependencies(
   executables: readonly string[],
   outputs: Record<string, string> = {},
+  nodeScripts: readonly string[] = [],
 ): AgentRuntimeDependencies {
   return {
     envPath: "/custom/bin:/usr/bin",
     homeDirectory: "/Users/operator",
+    managedInstallDirectory: "/data/agent-tools",
+    electronExecutable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+    npmCliPath: "/app/npm-cli.js",
+    setupRunnerPath: "/app/agent-setup-runner.js",
     isExecutable: (path) => executables.includes(path),
+    isNodeScript: (path) => nodeScripts.includes(path),
     runCommand: vi.fn(async (executable, args) => {
       const key = `${executable} ${args.join(" ")}`;
       if (!(key in outputs)) throw new Error(`Unexpected command: ${key}`);
@@ -76,6 +83,10 @@ describe("local agent runtime registry", () => {
             ],
           },
         ],
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       },
       {
         kind: "claude",
@@ -93,6 +104,10 @@ describe("local agent runtime registry", () => {
           { id: "sonnet", label: "Sonnet" },
           { id: "fable", label: "Fable" },
         ],
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       },
       {
         kind: "gemini",
@@ -105,6 +120,10 @@ describe("local agent runtime registry", () => {
           { id: "flash", label: "Flash" },
           { id: "flash-lite", label: "Flash Lite" },
         ],
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       },
       {
         kind: "ollama",
@@ -121,6 +140,10 @@ describe("local agent runtime registry", () => {
           { id: "gemma4:e4b", label: "gemma4:e4b" },
           { id: "qwen3-coder:latest", label: "qwen3-coder:latest" },
         ],
+        setup: {
+          installMethod: "external",
+          authentication: "not_required",
+        },
       },
     ]);
   });
@@ -283,5 +306,72 @@ describe("local agent runtime registry", () => {
         deps,
       ),
     ).toThrow("AGENT_EFFORT_UNSUPPORTED");
+  });
+
+  it("builds fixed managed install and authentication commands", () => {
+    const managedCodex = "/data/agent-tools/node_modules/.bin/codex";
+    const deps = dependencies([managedCodex], {}, [managedCodex]);
+
+    expect(
+      resolveAgentSetupCommand({ kind: "codex", action: "install" }, deps),
+    ).toEqual({
+      executable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      args: [
+        "/app/agent-setup-runner.js",
+        "codex",
+        "/data/agent-tools",
+        "/app/npm-cli.js",
+      ],
+      env: {
+        ELECTRON_RUN_AS_NODE: "1",
+        CODRA_AGENT_SETUP_RUNNER: "1",
+      },
+      title: "Setup Codex",
+    });
+    expect(
+      resolveAgentSetupCommand({ kind: "codex", action: "authenticate" }, deps),
+    ).toEqual({
+      executable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      args: [managedCodex, "login"],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+      title: "Setup Codex",
+    });
+    expect(() =>
+      resolveAgentSetupCommand({ kind: "ollama", action: "install" }, deps),
+    ).toThrow("AGENT_SETUP_EXTERNAL_REQUIRED");
+    expect(() =>
+      resolveAgentSetupCommand(
+        { kind: "ollama", action: "authenticate" },
+        deps,
+      ),
+    ).toThrow("AGENT_SETUP_UNSUPPORTED");
+  });
+
+  it("launches managed JavaScript agents with Electron's Node runtime", () => {
+    const managedGemini = "/data/agent-tools/node_modules/.bin/gemini";
+    const deps = dependencies([managedGemini], {}, [managedGemini]);
+
+    expect(
+      resolveAgentCommand(
+        {
+          kind: "gemini",
+          yolo: false,
+          model: "auto",
+          prompt: "Review this workspace",
+        },
+        deps,
+      ),
+    ).toEqual({
+      executable: "/Applications/CODRA.app/Contents/MacOS/CODRA",
+      args: [
+        managedGemini,
+        "--model",
+        "auto",
+        "--prompt-interactive",
+        "Review this workspace",
+      ],
+      env: { ELECTRON_RUN_AS_NODE: "1" },
+      title: "Gemini · auto",
+    });
   });
 });

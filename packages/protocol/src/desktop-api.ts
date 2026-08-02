@@ -1,6 +1,8 @@
 import { z } from "zod";
-import type {
-  AgentRuntime,
+import {
+  TerminalDescriptorSchema,
+  type AgentRuntime,
+  type AgentSetupRequest,
   CreateTerminalRequest,
   ReplayTerminalRequest,
   ResizeTerminalRequest,
@@ -65,6 +67,7 @@ export type RemoteAccountStatus = z.infer<typeof RemoteAccountStatusSchema>;
 
 export const IPC_CHANNELS = {
   agentList: "codra:agent:list",
+  agentSetup: "codra:agent:setup",
   terminalList: "codra:terminal:list",
   terminalCreate: "codra:terminal:create",
   terminalWrite: "codra:terminal:write",
@@ -83,9 +86,21 @@ export const IPC_CHANNELS = {
   remoteAuthState: "codra:remote:auth-state",
 } as const;
 
+export const AgentSetupResultSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("terminal"),
+      terminal: TerminalDescriptorSchema,
+    })
+    .strict(),
+  z.object({ kind: z.literal("external") }).strict(),
+]);
+export type AgentSetupResult = z.infer<typeof AgentSetupResultSchema>;
+
 export interface CodraDesktopApi {
   agents: {
     list(): Promise<AgentRuntime[]>;
+    setup(request: AgentSetupRequest): Promise<AgentSetupResult>;
   };
   terminal: {
     list(): Promise<TerminalDescriptor[]>;

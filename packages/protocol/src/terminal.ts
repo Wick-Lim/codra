@@ -6,6 +6,22 @@ export const TerminalSizeSchema = z.object({
   rows: z.number().int().min(5).max(200),
 });
 export const AgentKindSchema = z.enum(["codex", "claude", "gemini", "ollama"]);
+export const AgentSetupActionSchema = z.enum(["install", "authenticate"]);
+export const AgentSetupRequestSchema = z
+  .object({
+    kind: AgentKindSchema,
+    action: AgentSetupActionSchema,
+  })
+  .strict()
+  .superRefine((request, context) => {
+    if (request.kind === "ollama" && request.action === "authenticate") {
+      context.addIssue({
+        code: "custom",
+        path: ["action"],
+        message: "Ollama does not require provider authentication",
+      });
+    }
+  });
 export const AgentModelIdSchema = z
   .string()
   .trim()
@@ -73,11 +89,26 @@ export const AgentRuntimeSchema = z
     efforts: AgentEffortOptionSchema.array().max(12),
     models: AgentModelOptionSchema.array().max(200),
     installHint: z.string().trim().min(1).max(240),
+    setup: z
+      .object({
+        installMethod: z.enum(["managed_npm", "external"]),
+        authentication: z.enum(["required", "not_required"]),
+      })
+      .strict(),
   })
   .strict();
 export const CreateTerminalRequestSchema = TerminalSizeSchema.extend({
   cwd: z.string().min(1).max(4096).optional(),
   agent: AgentLaunchRequestSchema.optional(),
+  agentSetup: AgentSetupRequestSchema.optional(),
+}).superRefine((request, context) => {
+  if (request.agent && request.agentSetup) {
+    context.addIssue({
+      code: "custom",
+      path: ["agentSetup"],
+      message: "A terminal cannot launch an agent and a setup workflow",
+    });
+  }
 });
 export const WriteTerminalRequestSchema = z.object({
   terminalId: TerminalIdSchema,
@@ -100,6 +131,8 @@ export const ReplayTerminalRequestSchema = z.object({
 
 export type CreateTerminalRequest = z.infer<typeof CreateTerminalRequestSchema>;
 export type AgentKind = z.infer<typeof AgentKindSchema>;
+export type AgentSetupAction = z.infer<typeof AgentSetupActionSchema>;
+export type AgentSetupRequest = z.infer<typeof AgentSetupRequestSchema>;
 export type AgentEffortOption = z.infer<typeof AgentEffortOptionSchema>;
 export type AgentModelOption = z.infer<typeof AgentModelOptionSchema>;
 export type AgentLaunchRequest = z.infer<typeof AgentLaunchRequestSchema>;

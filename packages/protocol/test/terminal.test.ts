@@ -3,6 +3,7 @@ import {
   AgentKindSchema,
   AgentLaunchRequestSchema,
   AgentRuntimeSchema,
+  AgentSetupRequestSchema,
   CreateTerminalRequestSchema,
   ResizeTerminalRequestSchema,
   WriteTerminalRequestSchema,
@@ -59,6 +60,10 @@ describe("terminal protocol", () => {
           },
         ],
         installHint: "Install Claude Code to use this runtime.",
+        setup: {
+          installMethod: "managed_npm",
+          authentication: "required",
+        },
       }),
     ).toEqual({
       kind: "claude",
@@ -79,7 +84,54 @@ describe("terminal protocol", () => {
         },
       ],
       installHint: "Install Claude Code to use this runtime.",
+      setup: {
+        installMethod: "managed_npm",
+        authentication: "required",
+      },
     });
+  });
+
+  it("accepts only fixed runtime setup actions and exclusive terminal modes", () => {
+    const install = { kind: "codex", action: "install" } as const;
+    const authenticate = {
+      kind: "gemini",
+      action: "authenticate",
+    } as const;
+
+    expect(AgentSetupRequestSchema.parse(install)).toEqual(install);
+    expect(AgentSetupRequestSchema.parse(authenticate)).toEqual(authenticate);
+    expect(
+      CreateTerminalRequestSchema.parse({
+        cols: 100,
+        rows: 30,
+        agentSetup: install,
+      }),
+    ).toEqual({ cols: 100, rows: 30, agentSetup: install });
+    expect(() =>
+      AgentSetupRequestSchema.parse({
+        kind: "codex",
+        action: "install",
+        package: "attacker-controlled-package",
+      }),
+    ).toThrow();
+    expect(() =>
+      AgentSetupRequestSchema.parse({
+        kind: "ollama",
+        action: "authenticate",
+      }),
+    ).toThrow();
+    expect(() =>
+      CreateTerminalRequestSchema.parse({
+        cols: 100,
+        rows: 30,
+        agent: {
+          kind: "codex",
+          yolo: false,
+          prompt: "Review this workspace",
+        },
+        agentSetup: install,
+      }),
+    ).toThrow();
   });
 
   it("rejects unknown agents, blank prompts, and oversized initial prompts", () => {

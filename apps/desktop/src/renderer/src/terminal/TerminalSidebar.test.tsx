@@ -103,6 +103,10 @@ function createPaneApi(
           efforts: [{ id: "high", label: "High" }],
           models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
           installHint: "Install Codex CLI to use this runtime.",
+          setup: {
+            installMethod: "managed_npm",
+            authentication: "required",
+          },
         },
         {
           kind: "claude",
@@ -114,6 +118,10 @@ function createPaneApi(
           efforts: [{ id: "high", label: "High" }],
           models: [{ id: "sonnet", label: "Sonnet" }],
           installHint: "Install Claude Code to use this runtime.",
+          setup: {
+            installMethod: "managed_npm",
+            authentication: "required",
+          },
         },
         {
           kind: "gemini",
@@ -128,6 +136,10 @@ function createPaneApi(
             { id: "pro", label: "Pro" },
           ],
           installHint: "Install @google/gemini-cli to use this runtime.",
+          setup: {
+            installMethod: "managed_npm",
+            authentication: "required",
+          },
         },
         {
           kind: "ollama",
@@ -139,6 +151,10 @@ function createPaneApi(
           efforts: [{ id: "high", label: "High" }],
           models: [{ id: "gemma4:e4b", label: "gemma4:e4b" }],
           installHint: "Install Ollama and pull a model to use this runtime.",
+          setup: {
+            installMethod: "external",
+            authentication: "not_required",
+          },
         },
       ]),
     },
