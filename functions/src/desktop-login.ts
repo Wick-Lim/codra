@@ -197,6 +197,18 @@ async function withRawDesktopLoginRequest(
       sendRawError(response, error.message, error.code === "not-found" ? 404 : 400);
       return;
     }
+    const details =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            code:
+              typeof (error as { code?: unknown }).code === "string"
+                ? (error as unknown as { code: string }).code
+                : undefined,
+          }
+        : { name: typeof error, message: "Non-Error exception" };
+    console.error("desktopLogin raw request failed", details);
     sendRawError(response, "INTERNAL_ERROR", 500);
   }
 }
