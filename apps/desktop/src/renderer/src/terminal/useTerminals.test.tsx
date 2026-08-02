@@ -30,6 +30,15 @@ function createDesktopApiFake() {
   const api: CodraDesktopApi = {
     agents: {
       list: vi.fn().mockResolvedValue([]),
+      targets: vi.fn().mockResolvedValue([
+        { target: { kind: "local" }, state: "connected" },
+      ]),
+      connectTarget: vi.fn(),
+      listForTarget: vi.fn().mockResolvedValue([]),
+      workspaceRoots: vi.fn().mockResolvedValue([]),
+      workspaceList: vi.fn(),
+      workspaceValidate: vi.fn(),
+      onTargetsChanged: vi.fn(() => vi.fn()),
       setup: vi.fn(),
     },
     terminal: {

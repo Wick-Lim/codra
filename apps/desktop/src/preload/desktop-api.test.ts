@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   IPC_CHANNELS,
+  type AgentLaunchTarget,
   type RemoteAccountStatus,
   type RemoteHostStatus,
   type TerminalDescriptor,
@@ -52,6 +53,105 @@ const descriptor: TerminalDescriptor = {
 };
 
 describe("createDesktopApi", () => {
+  it("routes target discovery and workspace browsing through strict channels", async () => {
+    const remoteTarget = {
+      kind: "remote" as const,
+      deviceId: "2d19c478-51e8-4eb8-8aa0-a2c9f2aabec1",
+      displayName: "Studio Mac",
+    };
+    const targets = [
+      { target: { kind: "local" as const }, state: "connected" as const },
+      { target: remoteTarget, state: "available" as const },
+    ];
+    const connected = { target: remoteTarget, state: "connected" as const };
+    const runtimes = [
+      {
+        kind: "codex" as const,
+        label: "Codex CLI",
+        description: "OpenAI's coding agent for repository work.",
+        available: true,
+        supportsYolo: true,
+        modelRequired: false,
+        efforts: [],
+        models: [],
+        installHint: "Install Codex CLI to use this runtime.",
+        setup: {
+          installMethod: "managed_npm" as const,
+          authentication: "required" as const,
+        },
+      },
+    ];
+    const roots = [{ path: "/Users/codra", label: "Home" }];
+    const page = {
+      path: "/Users/codra",
+      label: "codra",
+      breadcrumbs: [
+        { path: "/", label: "/" },
+        { path: "/Users", label: "Users" },
+        { path: "/Users/codra", label: "codra" },
+      ],
+      entries: [{ path: "/Users/codra/project", name: "project" }],
+    };
+    const workspace = { path: "/Users/codra/project", label: "project" };
+    const ipc = new FakeIpcRenderer(
+      new Map<string, unknown>([
+        [IPC_CHANNELS.agentTargets, targets],
+        [IPC_CHANNELS.agentConnectTarget, connected],
+        [IPC_CHANNELS.agentTargetRuntimes, runtimes],
+        [IPC_CHANNELS.agentWorkspaceRoots, roots],
+        [IPC_CHANNELS.agentWorkspaceList, page],
+        [IPC_CHANNELS.agentWorkspaceValidate, workspace],
+      ]),
+    );
+    const api = createDesktopApi(ipc);
+    const changed: AgentLaunchTarget[][] = [];
+    api.agents.onTargetsChanged((next) => changed.push(next));
+
+    await expect(api.agents.targets()).resolves.toEqual(targets);
+    await expect(api.agents.connectTarget(remoteTarget)).resolves.toEqual(
+      connected,
+    );
+    await expect(api.agents.listForTarget(remoteTarget)).resolves.toEqual(
+      runtimes,
+    );
+    await expect(api.agents.workspaceRoots(remoteTarget)).resolves.toEqual(
+      roots,
+    );
+    await expect(
+      api.agents.workspaceList(remoteTarget, "/Users/codra"),
+    ).resolves.toEqual(page);
+    await expect(
+      api.agents.workspaceValidate(remoteTarget, "/Users/codra/project"),
+    ).resolves.toEqual(workspace);
+    ipc.emit(IPC_CHANNELS.agentTargetsChanged, targets);
+    ipc.emit(IPC_CHANNELS.agentTargetsChanged, [{ target: remoteTarget }]);
+
+    expect(changed).toEqual([targets]);
+    expect(ipc.invocations).toEqual([
+      { channel: IPC_CHANNELS.agentTargets, args: [] },
+      {
+        channel: IPC_CHANNELS.agentConnectTarget,
+        args: [{ target: remoteTarget }],
+      },
+      {
+        channel: IPC_CHANNELS.agentTargetRuntimes,
+        args: [{ target: remoteTarget }],
+      },
+      {
+        channel: IPC_CHANNELS.agentWorkspaceRoots,
+        args: [{ target: remoteTarget }],
+      },
+      {
+        channel: IPC_CHANNELS.agentWorkspaceList,
+        args: [{ target: remoteTarget, path: "/Users/codra" }],
+      },
+      {
+        channel: IPC_CHANNELS.agentWorkspaceValidate,
+        args: [{ target: remoteTarget, path: "/Users/codra/project" }],
+      },
+    ]);
+  });
+
   it("routes account login and host activation independently", async () => {
     const signedIn = {
       state: "signed_in",

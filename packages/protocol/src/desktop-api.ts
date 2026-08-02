@@ -1,8 +1,17 @@
 import { z } from "zod";
 import {
+  AgentExecutionTargetSchema,
+  RemoteAgentExecutionTargetSchema,
+  TerminalCwdSchema,
   TerminalDescriptorSchema,
+  type AgentExecutionTarget,
+  type AgentLaunchTarget,
   type AgentRuntime,
   type AgentSetupRequest,
+  type RemoteAgentExecutionTarget,
+  type WorkspaceDirectoryPage,
+  type WorkspaceRoot,
+  type WorkspaceSelection,
   CreateTerminalRequest,
   ReplayTerminalRequest,
   ResizeTerminalRequest,
@@ -10,6 +19,41 @@ import {
   TerminalOutputChunk,
   WriteTerminalRequest,
 } from "./terminal";
+
+export const AgentTargetConnectRequestSchema = z
+  .object({ target: RemoteAgentExecutionTargetSchema })
+  .strict();
+export const AgentTargetRuntimeRequestSchema = z
+  .object({ target: AgentExecutionTargetSchema })
+  .strict();
+export const WorkspaceTargetRequestSchema = z
+  .object({ target: AgentExecutionTargetSchema })
+  .strict();
+export const WorkspaceListRequestSchema = z
+  .object({
+    target: AgentExecutionTargetSchema,
+    path: TerminalCwdSchema,
+  })
+  .strict();
+export const WorkspaceValidateRequestSchema = z
+  .object({
+    target: AgentExecutionTargetSchema,
+    path: TerminalCwdSchema,
+  })
+  .strict();
+export type AgentTargetConnectRequest = z.infer<
+  typeof AgentTargetConnectRequestSchema
+>;
+export type AgentTargetRuntimeRequest = z.infer<
+  typeof AgentTargetRuntimeRequestSchema
+>;
+export type WorkspaceTargetRequest = z.infer<
+  typeof WorkspaceTargetRequestSchema
+>;
+export type WorkspaceListRequest = z.infer<typeof WorkspaceListRequestSchema>;
+export type WorkspaceValidateRequest = z.infer<
+  typeof WorkspaceValidateRequestSchema
+>;
 
 export const RemoteHostStateSchema = z.enum([
   "idle",
@@ -68,6 +112,13 @@ export type RemoteAccountStatus = z.infer<typeof RemoteAccountStatusSchema>;
 export const IPC_CHANNELS = {
   agentList: "codra:agent:list",
   agentSetup: "codra:agent:setup",
+  agentTargets: "codra:agent:targets",
+  agentConnectTarget: "codra:agent:connect-target",
+  agentTargetRuntimes: "codra:agent:target-runtimes",
+  agentWorkspaceRoots: "codra:agent:workspace-roots",
+  agentWorkspaceList: "codra:agent:workspace-list",
+  agentWorkspaceValidate: "codra:agent:workspace-validate",
+  agentTargetsChanged: "codra:agent:targets-changed",
   terminalList: "codra:terminal:list",
   terminalDefaultCwd: "codra:terminal:default-cwd",
   terminalChooseCwd: "codra:terminal:choose-cwd",
@@ -102,6 +153,23 @@ export type AgentSetupResult = z.infer<typeof AgentSetupResultSchema>;
 export interface CodraDesktopApi {
   agents: {
     list(): Promise<AgentRuntime[]>;
+    targets(): Promise<AgentLaunchTarget[]>;
+    connectTarget(
+      target: RemoteAgentExecutionTarget,
+    ): Promise<AgentLaunchTarget>;
+    listForTarget(target: AgentExecutionTarget): Promise<AgentRuntime[]>;
+    workspaceRoots(target: AgentExecutionTarget): Promise<WorkspaceRoot[]>;
+    workspaceList(
+      target: AgentExecutionTarget,
+      path: string,
+    ): Promise<WorkspaceDirectoryPage>;
+    workspaceValidate(
+      target: AgentExecutionTarget,
+      path: string,
+    ): Promise<WorkspaceSelection>;
+    onTargetsChanged(
+      listener: (targets: AgentLaunchTarget[]) => void,
+    ): () => void;
     setup(request: AgentSetupRequest): Promise<AgentSetupResult>;
   };
   terminal: {

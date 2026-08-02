@@ -95,6 +95,15 @@ function createPaneApi(
   const api: CodraDesktopApi = {
     agents: {
       setup: vi.fn(),
+      targets: vi.fn().mockResolvedValue([
+        { target: { kind: "local" }, state: "connected" },
+      ]),
+      connectTarget: vi.fn(),
+      listForTarget: vi.fn().mockResolvedValue([]),
+      workspaceRoots: vi.fn().mockResolvedValue([]),
+      workspaceList: vi.fn(),
+      workspaceValidate: vi.fn(),
+      onTargetsChanged: vi.fn(() => vi.fn()),
       list: vi.fn().mockResolvedValue([
         {
           kind: "codex",

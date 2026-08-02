@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentTargetConnectRequestSchema,
+  AgentTargetRuntimeRequestSchema,
   AgentSetupResultSchema,
   IPC_CHANNELS,
   RemoteAccountProfileSchema,
@@ -8,7 +10,16 @@ import {
   RemoteAuthProviderSchema,
   RemoteHostStateSchema,
   RemoteHostStatusSchema,
+  WorkspaceListRequestSchema,
+  WorkspaceTargetRequestSchema,
+  WorkspaceValidateRequestSchema,
 } from "../src/desktop-api";
+
+const remoteTarget = {
+  kind: "remote",
+  deviceId: "2d19c478-51e8-4eb8-8aa0-a2c9f2aabec1",
+  displayName: "Studio Mac",
+} as const;
 
 describe("desktop remote IPC contract", () => {
   it("accepts the bounded remote host states and status payload", () => {
@@ -90,5 +101,54 @@ describe("desktop remote IPC contract", () => {
         url: "https://attacker.example/install",
       }),
     ).toThrow();
+  });
+
+  it("validates target runtime and workspace requests before privileged IPC", () => {
+    expect(
+      AgentTargetConnectRequestSchema.parse({ target: remoteTarget }),
+    ).toEqual({ target: remoteTarget });
+    expect(
+      AgentTargetRuntimeRequestSchema.parse({ target: { kind: "local" } }),
+    ).toEqual({ target: { kind: "local" } });
+    expect(
+      WorkspaceTargetRequestSchema.parse({ target: remoteTarget }),
+    ).toEqual({ target: remoteTarget });
+    expect(
+      WorkspaceListRequestSchema.parse({
+        target: remoteTarget,
+        path: "/Users/codra",
+      }),
+    ).toEqual({ target: remoteTarget, path: "/Users/codra" });
+    expect(
+      WorkspaceValidateRequestSchema.parse({
+        target: remoteTarget,
+        path: "/Users/codra/project",
+      }),
+    ).toEqual({ target: remoteTarget, path: "/Users/codra/project" });
+    expect(() =>
+      WorkspaceListRequestSchema.parse({
+        target: remoteTarget,
+        path: "/Users/codra",
+        includeFiles: true,
+      }),
+    ).toThrow();
+  });
+
+  it("names every target and workspace IPC boundary explicitly", () => {
+    expect(IPC_CHANNELS.agentTargets).toBe("codra:agent:targets");
+    expect(IPC_CHANNELS.agentConnectTarget).toBe("codra:agent:connect-target");
+    expect(IPC_CHANNELS.agentTargetRuntimes).toBe(
+      "codra:agent:target-runtimes",
+    );
+    expect(IPC_CHANNELS.agentWorkspaceRoots).toBe(
+      "codra:agent:workspace-roots",
+    );
+    expect(IPC_CHANNELS.agentWorkspaceList).toBe("codra:agent:workspace-list");
+    expect(IPC_CHANNELS.agentWorkspaceValidate).toBe(
+      "codra:agent:workspace-validate",
+    );
+    expect(IPC_CHANNELS.agentTargetsChanged).toBe(
+      "codra:agent:targets-changed",
+    );
   });
 });

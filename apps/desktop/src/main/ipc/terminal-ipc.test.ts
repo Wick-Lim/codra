@@ -339,16 +339,18 @@ describe("registerTerminalIpc", () => {
     expect(harness.manager.close).not.toHaveBeenCalled();
   });
 
-  it("passes parsed requests instead of raw payloads to the manager", async () => {
+  it("rejects unknown terminal creation fields before invoking the manager", async () => {
     const harness = createIpcHarness();
 
-    await harness.handlers.invoke(IPC_CHANNELS.terminalCreate, {
-      cols: 80,
-      rows: 24,
-      ignored: "untrusted",
-    });
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalCreate, {
+        cols: 80,
+        rows: 24,
+        ignored: "untrusted",
+      }),
+    ).rejects.toThrow();
 
-    expect(harness.manager.create).toHaveBeenCalledWith({ cols: 80, rows: 24 });
+    expect(harness.manager.create).not.toHaveBeenCalled();
   });
 
   it("rejects PTY creation after an owned renderer reaches an HTTPS page", async () => {

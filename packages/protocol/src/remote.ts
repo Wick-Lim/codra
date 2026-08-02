@@ -9,7 +9,16 @@ import {
   ThumbprintSchema,
   createRfc7638Thumbprint,
 } from "./remote-signing";
-import { TerminalIdSchema, TerminalSizeSchema } from "./terminal";
+import {
+  AgentLaunchRequestSchema,
+  AgentRuntimeSchema,
+  TerminalCwdSchema,
+  TerminalIdSchema,
+  TerminalSizeSchema,
+  WorkspaceDirectoryPageSchema,
+  WorkspaceRootSchema,
+  WorkspaceSelectionSchema,
+} from "./terminal";
 
 export const REMOTE_PROTOCOL_VERSION = 1 as const;
 export const ACCOUNT_AUTH_MAX_AGE_MS = 5 * 60 * 1000;
@@ -785,6 +794,109 @@ const terminalResize = z
     ...TerminalSizeSchema.shape,
   })
   .strict();
+const workspaceRoots = z
+  .object({ type: z.literal("workspace.roots"), requestId })
+  .strict();
+const workspaceList = z
+  .object({
+    type: z.literal("workspace.list"),
+    requestId,
+    path: TerminalCwdSchema,
+  })
+  .strict();
+const workspaceValidate = z
+  .object({
+    type: z.literal("workspace.validate"),
+    requestId,
+    path: TerminalCwdSchema,
+  })
+  .strict();
+const agentRuntimes = z
+  .object({ type: z.literal("agent.runtimes"), requestId })
+  .strict();
+const agentLaunch = z
+  .object({
+    type: z.literal("agent.launch"),
+    requestId,
+    cwd: TerminalCwdSchema,
+    ...TerminalSizeSchema.shape,
+    agent: AgentLaunchRequestSchema,
+  })
+  .strict();
+const workspaceOk = z.discriminatedUnion("operation", [
+  z
+    .object({
+      type: z.literal("workspace.ok"),
+      requestId,
+      operation: z.literal("workspace.roots"),
+      result: z.object({ roots: WorkspaceRootSchema.array().max(32) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("workspace.ok"),
+      requestId,
+      operation: z.literal("workspace.list"),
+      result: z.object({ page: WorkspaceDirectoryPageSchema }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("workspace.ok"),
+      requestId,
+      operation: z.literal("workspace.validate"),
+      result: z.object({ workspace: WorkspaceSelectionSchema }).strict(),
+    })
+    .strict(),
+]);
+const agentOk = z.discriminatedUnion("operation", [
+  z
+    .object({
+      type: z.literal("agent.ok"),
+      requestId,
+      operation: z.literal("agent.runtimes"),
+      result: z
+        .object({ runtimes: AgentRuntimeSchema.array().max(32) })
+        .strict(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("agent.ok"),
+      requestId,
+      operation: z.literal("agent.launch"),
+      result: z.object({ terminal: RemoteTerminalDescriptorSchema }).strict(),
+    })
+    .strict(),
+]);
+export const RemoteOperationNameSchema = z.enum([
+  "workspace.roots",
+  "workspace.list",
+  "workspace.validate",
+  "agent.runtimes",
+  "agent.launch",
+]);
+export const RemoteOperationErrorCodeSchema = z.enum([
+  "HANDSHAKE_REQUIRED",
+  "SCOPE_DENIED",
+  "WORKSPACE_NOT_FOUND",
+  "WORKSPACE_NOT_DIRECTORY",
+  "WORKSPACE_PERMISSION_DENIED",
+  "WORKSPACE_OUTSIDE_ROOTS",
+  "RUNTIME_UNAVAILABLE",
+  "TARGET_DISCONNECTED",
+  "INVALID_REQUEST",
+  "INTERNAL_ERROR",
+]);
+const operationError = z
+  .object({
+    type: z.literal("operation.error"),
+    requestId,
+    operation: RemoteOperationNameSchema,
+    code: RemoteOperationErrorCodeSchema,
+    message: z.string().trim().min(1).max(512),
+  })
+  .strict();
 const terminalOk = z.discriminatedUnion("operation", [
   z
     .object({
@@ -858,6 +970,14 @@ export const RemoteControlMessageSchema = z
     terminalDetach,
     terminalWrite,
     terminalResize,
+    workspaceRoots,
+    workspaceList,
+    workspaceValidate,
+    agentRuntimes,
+    agentLaunch,
+    workspaceOk,
+    agentOk,
+    operationError,
     terminalOk,
     terminalError,
     cursorAck,

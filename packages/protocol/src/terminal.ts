@@ -2,6 +2,125 @@ import { z } from "zod";
 
 export const TerminalIdSchema = z.string().uuid();
 export const TerminalCwdSchema = z.string().min(1).max(4096);
+export const LocalAgentExecutionTargetSchema = z
+  .object({ kind: z.literal("local") })
+  .strict();
+export const RemoteAgentExecutionTargetSchema = z
+  .object({
+    kind: z.literal("remote"),
+    deviceId: z.string().uuid(),
+    displayName: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export const AgentExecutionTargetSchema = z.discriminatedUnion("kind", [
+  LocalAgentExecutionTargetSchema,
+  RemoteAgentExecutionTargetSchema,
+]);
+export type LocalAgentExecutionTarget = z.infer<
+  typeof LocalAgentExecutionTargetSchema
+>;
+export type RemoteAgentExecutionTarget = z.infer<
+  typeof RemoteAgentExecutionTargetSchema
+>;
+export type AgentExecutionTarget = z.infer<typeof AgentExecutionTargetSchema>;
+
+export const WorkspaceSelectionSchema = z
+  .object({
+    path: TerminalCwdSchema,
+    label: z.string().trim().min(1).max(512),
+  })
+  .strict();
+export const AgentWorkspaceSchema = z
+  .object({
+    target: AgentExecutionTargetSchema,
+    path: TerminalCwdSchema,
+    label: z.string().trim().min(1).max(512),
+  })
+  .strict();
+export type WorkspaceSelection = z.infer<typeof WorkspaceSelectionSchema>;
+export type AgentWorkspace = z.infer<typeof AgentWorkspaceSchema>;
+
+export const WORKSPACE_DIRECTORY_MAX_ENTRIES = 250;
+export const WORKSPACE_DIRECTORY_MAX_UTF8_BYTES = 64 * 1024;
+export const WorkspaceRootSchema = WorkspaceSelectionSchema;
+export const WorkspaceBreadcrumbSchema = WorkspaceSelectionSchema;
+export const WorkspaceDirectoryEntrySchema = z
+  .object({
+    path: TerminalCwdSchema,
+    name: z.string().trim().min(1).max(512),
+  })
+  .strict();
+export const WorkspaceDirectoryPageSchema = z
+  .object({
+    path: TerminalCwdSchema,
+    label: z.string().trim().min(1).max(512),
+    breadcrumbs: WorkspaceBreadcrumbSchema.array().max(128),
+    entries: WorkspaceDirectoryEntrySchema.array().max(
+      WORKSPACE_DIRECTORY_MAX_ENTRIES,
+    ),
+  })
+  .strict()
+  .superRefine((page, context) => {
+    if (
+      new TextEncoder().encode(JSON.stringify(page)).byteLength >
+      WORKSPACE_DIRECTORY_MAX_UTF8_BYTES
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Workspace directory metadata exceeds 64 KiB",
+      });
+    }
+  });
+export type WorkspaceRoot = z.infer<typeof WorkspaceRootSchema>;
+export type WorkspaceBreadcrumb = z.infer<typeof WorkspaceBreadcrumbSchema>;
+export type WorkspaceDirectoryEntry = z.infer<
+  typeof WorkspaceDirectoryEntrySchema
+>;
+export type WorkspaceDirectoryPage = z.infer<
+  typeof WorkspaceDirectoryPageSchema
+>;
+
+export const AgentLaunchTargetStateSchema = z.enum([
+  "available",
+  "waiting_for_approval",
+  "connecting",
+  "connected",
+  "rejected",
+  "offline",
+  "error",
+]);
+export const AgentLaunchTargetSchema = z
+  .object({
+    target: AgentExecutionTargetSchema,
+    state: AgentLaunchTargetStateSchema,
+    message: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.target.kind === "local" && value.state !== "connected") {
+      context.addIssue({
+        code: "custom",
+        path: ["state"],
+        message: "The local target is always connected",
+      });
+    }
+  });
+export type AgentLaunchTargetState = z.infer<
+  typeof AgentLaunchTargetStateSchema
+>;
+export type AgentLaunchTarget = z.infer<typeof AgentLaunchTargetSchema>;
+
+export function workspacePathLabel(path: string): string {
+  const parsed = TerminalCwdSchema.parse(path);
+  if (/^[A-Za-z]:[\\/]*$/u.test(parsed)) {
+    return `${parsed.slice(0, 2)}\\`;
+  }
+  if (/^[\\/]+$/u.test(parsed)) return parsed[0] ?? "/";
+  const withoutTrailingSeparators = parsed.replace(/[\\/]+$/gu, "");
+  const segments = withoutTrailingSeparators.split(/[\\/]/gu);
+  return segments.at(-1) || parsed;
+}
+
 export const ChooseTerminalCwdRequestSchema = z
   .object({
     defaultPath: TerminalCwdSchema,
@@ -105,18 +224,35 @@ export const AgentRuntimeSchema = z
   })
   .strict();
 export const CreateTerminalRequestSchema = TerminalSizeSchema.extend({
+  target: AgentExecutionTargetSchema.optional(),
   cwd: TerminalCwdSchema.optional(),
   agent: AgentLaunchRequestSchema.optional(),
   agentSetup: AgentSetupRequestSchema.optional(),
-}).superRefine((request, context) => {
-  if (request.agent && request.agentSetup) {
-    context.addIssue({
-      code: "custom",
-      path: ["agentSetup"],
-      message: "A terminal cannot launch an agent and a setup workflow",
-    });
-  }
-});
+})
+  .strict()
+  .superRefine((request, context) => {
+    if (request.agent && request.agentSetup) {
+      context.addIssue({
+        code: "custom",
+        path: ["agentSetup"],
+        message: "A terminal cannot launch an agent and a setup workflow",
+      });
+    }
+    if (request.target?.kind === "remote" && !request.agent) {
+      context.addIssue({
+        code: "custom",
+        path: ["agent"],
+        message: "A remote terminal creation request requires an agent",
+      });
+    }
+    if (request.target?.kind === "remote" && !request.cwd) {
+      context.addIssue({
+        code: "custom",
+        path: ["cwd"],
+        message: "A remote agent requires a working directory",
+      });
+    }
+  });
 export const WriteTerminalRequestSchema = z.object({
   terminalId: TerminalIdSchema,
   data: z
@@ -160,6 +296,7 @@ export interface TerminalDescriptor {
   state: "running" | "exited";
   createdAt: string;
   exitCode?: number;
+  origin?: AgentExecutionTarget;
 }
 
 export interface TerminalOutputChunk {
@@ -182,8 +319,8 @@ export interface TerminalOutputCursorReadResult {
   truncated: boolean;
 }
 
-export const TerminalDescriptorSchema: z.ZodType<TerminalDescriptor> = z.object(
-  {
+export const TerminalDescriptorSchema: z.ZodType<TerminalDescriptor> = z
+  .object({
     id: TerminalIdSchema,
     title: z.string().min(1).max(200),
     cwd: TerminalCwdSchema,
@@ -192,8 +329,9 @@ export const TerminalDescriptorSchema: z.ZodType<TerminalDescriptor> = z.object(
     state: z.enum(["running", "exited"]),
     createdAt: z.string().datetime(),
     exitCode: z.number().int().optional(),
-  },
-);
+    origin: AgentExecutionTargetSchema.optional(),
+  })
+  .strict();
 
 export const TerminalOutputChunkSchema: z.ZodType<TerminalOutputChunk> =
   z.object({

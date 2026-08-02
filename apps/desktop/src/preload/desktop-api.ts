@@ -1,7 +1,10 @@
 import {
+  AgentLaunchTargetSchema,
   AgentRuntimeSchema,
   AgentSetupRequestSchema,
   AgentSetupResultSchema,
+  AgentTargetConnectRequestSchema,
+  AgentTargetRuntimeRequestSchema,
   ChooseTerminalCwdRequestSchema,
   ChooseTerminalCwdResultSchema,
   CreateTerminalRequestSchema,
@@ -15,6 +18,12 @@ import {
   TerminalCwdSchema,
   TerminalIdSchema,
   TerminalOutputChunkSchema,
+  WorkspaceDirectoryPageSchema,
+  WorkspaceListRequestSchema,
+  WorkspaceRootSchema,
+  WorkspaceSelectionSchema,
+  WorkspaceTargetRequestSchema,
+  WorkspaceValidateRequestSchema,
   WriteTerminalRequestSchema,
   type CodraDesktopApi,
 } from "@codra/protocol";
@@ -42,6 +51,61 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
         return AgentRuntimeSchema.array().parse(
           await ipc.invoke(IPC_CHANNELS.agentList),
         );
+      },
+      async targets() {
+        return AgentLaunchTargetSchema.array().parse(
+          await ipc.invoke(IPC_CHANNELS.agentTargets),
+        );
+      },
+      async connectTarget(target) {
+        return AgentLaunchTargetSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentConnectTarget,
+            AgentTargetConnectRequestSchema.parse({ target }),
+          ),
+        );
+      },
+      async listForTarget(target) {
+        return AgentRuntimeSchema.array().parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentTargetRuntimes,
+            AgentTargetRuntimeRequestSchema.parse({ target }),
+          ),
+        );
+      },
+      async workspaceRoots(target) {
+        return WorkspaceRootSchema.array().parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentWorkspaceRoots,
+            WorkspaceTargetRequestSchema.parse({ target }),
+          ),
+        );
+      },
+      async workspaceList(target, path) {
+        return WorkspaceDirectoryPageSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentWorkspaceList,
+            WorkspaceListRequestSchema.parse({ target, path }),
+          ),
+        );
+      },
+      async workspaceValidate(target, path) {
+        return WorkspaceSelectionSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.agentWorkspaceValidate,
+            WorkspaceValidateRequestSchema.parse({ target, path }),
+          ),
+        );
+      },
+      onTargetsChanged(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = AgentLaunchTargetSchema.array().safeParse(payload);
+          if (parsed.success) listener(parsed.data);
+        };
+
+        ipc.on(IPC_CHANNELS.agentTargetsChanged, wrapped);
+        return () =>
+          ipc.removeListener(IPC_CHANNELS.agentTargetsChanged, wrapped);
       },
       async setup(request) {
         return AgentSetupResultSchema.parse(
