@@ -133,6 +133,68 @@ describe("SessionApprovalRegistry", () => {
     ).rejects.toThrow("REMOTE_SESSION_NOT_PENDING");
   });
 
+  it("clears the pending entry when the reject callable fails", async () => {
+    const { dependencies, registry } = harness({
+      reject: vi.fn(async () => {
+        throw new Error("REMOTE_HOST_NOT_STARTED");
+      }),
+    });
+    registry.handlePending(pendingSession());
+    await vi.waitFor(() => expect(registry.list()).toHaveLength(1));
+
+    await expect(registry.reject({ sessionId: SESSION_ID })).rejects.toThrow(
+      "REMOTE_HOST_NOT_STARTED",
+    );
+    expect(dependencies.reject).toHaveBeenCalledWith(expect.anything());
+    expect(registry.list()).toEqual([]);
+    await expect(registry.reject({ sessionId: SESSION_ID })).rejects.toThrow(
+      "REMOTE_SESSION_NOT_PENDING",
+    );
+  });
+
+  it("swallows a reject failure that follows an ensureWindow failure", async () => {
+    const windowFailure = new Error("Renderer URL policy is not initialized");
+    const rejectFailure = new Error("REMOTE_HOST_NOT_STARTED");
+    const { changes, dependencies, registry } = harness({
+      ensureWindow: vi.fn(async () => {
+        throw windowFailure;
+      }),
+      reject: vi.fn(async () => {
+        throw rejectFailure;
+      }),
+    });
+
+    registry.handlePending(pendingSession());
+    await vi.waitFor(() =>
+      expect(dependencies.reportError).toHaveBeenCalledWith(rejectFailure),
+    );
+
+    expect(dependencies.reportError).toHaveBeenCalledWith(windowFailure);
+    expect(registry.list()).toEqual([]);
+    expect(changes.at(-1)).toEqual([]);
+  });
+
+  it("stops notifying an unsubscribed listener while others keep receiving", async () => {
+    const { registry } = harness();
+    const firstChanges: PendingRemoteSession[][] = [];
+    const secondChanges: PendingRemoteSession[][] = [];
+    const unsubscribeFirst = registry.onChanged((sessions) =>
+      firstChanges.push(sessions),
+    );
+    registry.onChanged((sessions) => secondChanges.push(sessions));
+
+    registry.handlePending(pendingSession());
+    await vi.waitFor(() => expect(secondChanges.length).toBeGreaterThan(0));
+
+    unsubscribeFirst();
+    const firstCountAtUnsubscribe = firstChanges.length;
+    registry.clear();
+
+    expect(firstChanges).toHaveLength(firstCountAtUnsubscribe);
+    expect(secondChanges.length).toBeGreaterThan(firstCountAtUnsubscribe);
+    expect(secondChanges.at(-1)).toEqual([]);
+  });
+
   it("treats an expired session as no longer pending and clears every entry on demand", async () => {
     const clock = { value: 1_000 };
     const { changes, dependencies, registry } = harness({
