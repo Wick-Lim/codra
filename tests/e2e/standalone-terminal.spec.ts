@@ -3,6 +3,10 @@ import { _electron as electron } from "playwright";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type {
+  BrowserWindow as ElectronBrowserWindow,
+  OpenDialogOptions,
+} from "electron";
 import {
   processExists,
   rememberDescendants,
@@ -185,7 +189,7 @@ test("keeps the secured CODRA renderer when navigation or a new window is reques
   }
 });
 
-test("keeps agent workdir and launch actions visible in a compact window", async () => {
+test("chooses an agent workdir natively and keeps launch actions visible", async () => {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "codra-agent-ui-e2e-"));
   let electronApp: Awaited<ReturnType<typeof electron.launch>> | undefined;
   let electronPid: number | undefined;
@@ -213,9 +217,40 @@ test("keeps agent workdir and launch actions visible in a compact window", async
     const workdir = page.getByRole("textbox", { name: "Working directory" });
     await expect(workdir).toBeVisible();
     await expect(workdir).not.toHaveValue("");
+    await expect(workdir).toHaveAttribute("readonly", "");
     await expect(
       page.getByRole("textbox", { name: "First prompt" }),
     ).toBeFocused();
+    await electronApp.evaluate(({ BrowserWindow, dialog }) => {
+      Object.defineProperty(dialog, "showOpenDialog", {
+        configurable: true,
+        value: async (
+          parentWindow: ElectronBrowserWindow,
+          options: OpenDialogOptions,
+        ) => {
+          if (parentWindow !== BrowserWindow.getAllWindows()[0]) {
+            throw new Error("Directory picker was not owned by CODRA");
+          }
+          if (
+            options.title !== "Choose agent working directory" ||
+            options.buttonLabel !== "Choose" ||
+            !options.defaultPath ||
+            options.properties?.join("|") !== "openDirectory|createDirectory"
+          ) {
+            throw new Error("Unexpected directory picker options");
+          }
+          return {
+            canceled: false,
+            filePaths: ["/tmp/codra-selected-workspace"],
+            bookmarks: [],
+          };
+        },
+      });
+    });
+    await page
+      .getByRole("button", { name: "Choose working directory" })
+      .click();
+    await expect(workdir).toHaveValue("/tmp/codra-selected-workspace");
     const startButton = page.getByRole("button", { name: "Start agent" });
     const startBox = await startButton.boundingBox();
     const viewportHeight = await page.evaluate(() => window.innerHeight);

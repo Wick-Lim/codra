@@ -34,6 +34,7 @@ function createDesktopApiFake() {
     },
     terminal: {
       defaultCwd: vi.fn().mockResolvedValue("/Users/codra"),
+      chooseCwd: vi.fn().mockResolvedValue("/workspace/selected"),
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       write: vi.fn().mockResolvedValue(undefined),
@@ -80,6 +81,18 @@ describe("useTerminals", () => {
       expect(result.current.defaultCwd).toBe("/Users/codra");
     });
     expect(fake.api.terminal.defaultCwd).toHaveBeenCalledOnce();
+  });
+
+  it("opens the host directory picker from the requested working directory", async () => {
+    const fake = createDesktopApiFake();
+    const { result } = renderHook(() => useTerminals(fake.api));
+
+    await expect(result.current.chooseCwd("/workspace/codra")).resolves.toBe(
+      "/workspace/selected",
+    );
+    expect(fake.api.terminal.chooseCwd).toHaveBeenCalledWith(
+      "/workspace/codra",
+    );
   });
 
   it("keeps descriptor events received during the initial load without subscribing to output", async () => {

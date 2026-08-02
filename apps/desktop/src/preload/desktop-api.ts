@@ -2,6 +2,8 @@ import {
   AgentRuntimeSchema,
   AgentSetupRequestSchema,
   AgentSetupResultSchema,
+  ChooseTerminalCwdRequestSchema,
+  ChooseTerminalCwdResultSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   RemoteAccountStatusSchema,
@@ -54,6 +56,14 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
       async defaultCwd() {
         return TerminalCwdSchema.parse(
           await ipc.invoke(IPC_CHANNELS.terminalDefaultCwd),
+        );
+      },
+      async chooseCwd(defaultPath) {
+        return ChooseTerminalCwdResultSchema.parse(
+          await ipc.invoke(
+            IPC_CHANNELS.terminalChooseCwd,
+            ChooseTerminalCwdRequestSchema.parse({ defaultPath }),
+          ),
         );
       },
       async list() {

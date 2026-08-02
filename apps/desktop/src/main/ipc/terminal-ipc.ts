@@ -2,6 +2,8 @@ import {
   AgentRuntimeSchema,
   AgentSetupRequestSchema,
   AgentSetupResultSchema,
+  ChooseTerminalCwdRequestSchema,
+  ChooseTerminalCwdResultSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   ReplayTerminalRequestSchema,
@@ -57,6 +59,10 @@ export interface RegisterTerminalIpcOptions {
   admission?: TerminalRequestAdmission;
   listAgents?(): AgentRuntime[] | Promise<AgentRuntime[]>;
   defaultCwd?(): string;
+  chooseDirectory?(
+    parentWindow: BrowserWindowLike,
+    defaultPath: string,
+  ): Promise<string | null>;
   openExternal?(url: string): Promise<void>;
   reportError?(error: unknown): void;
 }
@@ -67,6 +73,7 @@ const requestChannels = [
   IPC_CHANNELS.agentList,
   IPC_CHANNELS.agentSetup,
   IPC_CHANNELS.terminalDefaultCwd,
+  IPC_CHANNELS.terminalChooseCwd,
   IPC_CHANNELS.terminalList,
   IPC_CHANNELS.terminalCreate,
   IPC_CHANNELS.terminalWrite,
@@ -108,21 +115,34 @@ export function registerTerminalIpc({
   admission = new TerminalAdmissionGate(),
   listAgents = listAgentRuntimes,
   defaultCwd = homedir,
+  chooseDirectory = async () => {
+    throw new Error("TERMINAL_DIRECTORY_PICKER_UNAVAILABLE");
+  },
   openExternal = async () => {
     throw new Error("AGENT_EXTERNAL_SETUP_UNAVAILABLE");
   },
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
   const activeSetups = new Map<AgentKind, string | null>();
-  const authorize = (event: unknown): void => {
+  const authorize = (event: unknown): BrowserWindowLike =>
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
-  };
   const registrations: readonly [string, IpcHandler][] = [
     [
       IPC_CHANNELS.terminalDefaultCwd,
       (event) => {
         authorize(event);
         return TerminalCwdSchema.parse(defaultCwd());
+      },
+    ],
+    [
+      IPC_CHANNELS.terminalChooseCwd,
+      async (event, rawRequest) => {
+        const owner = authorize(event);
+        const { defaultPath } =
+          ChooseTerminalCwdRequestSchema.parse(rawRequest);
+        return ChooseTerminalCwdResultSchema.parse(
+          await chooseDirectory(owner, defaultPath),
+        );
       },
     ],
     [

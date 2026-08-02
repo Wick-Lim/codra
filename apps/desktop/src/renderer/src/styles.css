@@ -1038,7 +1038,7 @@ button:focus-visible,
 
 .agent-picker legend,
 .agent-prompt-field > span,
-.agent-workdir-field > span:first-child {
+.agent-workdir-field > label {
   margin-bottom: 8px;
   color: var(--muted);
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -1365,7 +1365,8 @@ button:focus-visible,
 
 .agent-workdir-control {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .agent-workdir-prompt {
@@ -1388,15 +1389,46 @@ button:focus-visible,
   caret-color: var(--signal);
   background: var(--deck);
   border: 1px solid var(--steel);
-  border-radius: 5px;
+  border-radius: 5px 0 0 5px;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
   font-size: 9px;
   text-overflow: ellipsis;
 }
 
 .agent-workdir-control input:focus {
+  position: relative;
+  z-index: 1;
   border-color: var(--signal);
   outline: 2px solid rgb(145 167 255 / 13%);
+}
+
+.agent-workdir-control button {
+  min-width: 76px;
+  height: 34px;
+  margin-left: -1px;
+  padding: 6px 12px;
+  color: var(--fog-soft);
+  background: var(--bulkhead);
+  border: 1px solid var(--steel);
+  border-radius: 0 5px 5px 0;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.agent-workdir-control button:not(:disabled):hover,
+.agent-workdir-control button:not(:disabled):focus-visible {
+  position: relative;
+  z-index: 1;
+  color: var(--fog);
+  border-color: var(--signal);
+  outline: 2px solid rgb(145 167 255 / 13%);
+}
+
+.agent-workdir-control input:disabled,
+.agent-workdir-control button:disabled {
+  opacity: 0.58;
 }
 
 .agent-prompt-field textarea {

@@ -94,6 +94,8 @@ const agents: AgentRuntime[] = [
   },
 ];
 
+const cancelCwdSelection = async (): Promise<null> => null;
+
 describe("NewAgentDialog", () => {
   it("opens prompt-first before optional run configuration", async () => {
     render(
@@ -103,6 +105,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
         onOpenAgentSettings={vi.fn()}
       />,
     );
@@ -114,6 +117,9 @@ describe("NewAgentDialog", () => {
     expect(
       screen.getByRole("textbox", { name: "Working directory" }),
     ).toHaveValue("/workspace/codra");
+    expect(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    ).toHaveAttribute("readonly");
     await vi.waitFor(() => expect(prompt).toHaveFocus());
     expect(prompt).toBeRequired();
     expect(
@@ -131,6 +137,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
+        onChooseCwd={cancelCwdSelection}
         onOpenAgentSettings={onOpenAgentSettings}
       />,
     );
@@ -146,6 +153,7 @@ describe("NewAgentDialog", () => {
 
   it("submits the selected agent, YOLO choice, and trimmed first prompt", async () => {
     const onStart = vi.fn();
+    const onChooseCwd = vi.fn().mockResolvedValue("/workspace/auth");
     render(
       <NewAgentDialog
         open
@@ -153,6 +161,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
+        onChooseCwd={onChooseCwd}
       />,
     );
 
@@ -170,8 +179,11 @@ describe("NewAgentDialog", () => {
     const workingDirectory = screen.getByRole("textbox", {
       name: "Working directory",
     });
-    await userEvent.clear(workingDirectory);
-    await userEvent.type(workingDirectory, "/workspace/auth");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose working directory" }),
+    );
+    expect(onChooseCwd).toHaveBeenCalledWith("/workspace/codra");
+    expect(workingDirectory).toHaveValue("/workspace/auth");
     await userEvent.type(
       screen.getByRole("textbox", { name: "First prompt" }),
       "  Fix the auth callback  ",
@@ -190,6 +202,29 @@ describe("NewAgentDialog", () => {
     );
   });
 
+  it("keeps the current working directory when native selection is canceled", async () => {
+    const onChooseCwd = vi.fn().mockResolvedValue(null);
+    render(
+      <NewAgentDialog
+        open
+        agents={agents}
+        initialCwd="/workspace/codra"
+        onClose={vi.fn()}
+        onStart={vi.fn()}
+        onChooseCwd={onChooseCwd}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose working directory" }),
+    );
+
+    expect(onChooseCwd).toHaveBeenCalledWith("/workspace/codra");
+    expect(
+      screen.getByRole("textbox", { name: "Working directory" }),
+    ).toHaveValue("/workspace/codra");
+  });
+
   it("uses a searchable vertical catalog and exposes unavailable runtime guidance", async () => {
     const { rerender } = render(
       <NewAgentDialog
@@ -198,6 +233,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
 
@@ -223,6 +259,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
     expect(screen.getByText("No supported agent CLI was found.")).toBeVisible();
@@ -238,6 +275,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
 
@@ -278,6 +316,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={onStart}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
 
@@ -316,6 +355,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
 
@@ -331,6 +371,7 @@ describe("NewAgentDialog", () => {
         initialCwd="/workspace/codra"
         onClose={vi.fn()}
         onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
       />,
     );
 
@@ -340,10 +381,5 @@ describe("NewAgentDialog", () => {
       "Inspect this repository",
     );
     expect(screen.getByRole("button", { name: "Start agent" })).toBeEnabled();
-
-    await userEvent.clear(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    );
-    expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
   });
 });

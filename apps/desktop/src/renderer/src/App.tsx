@@ -20,6 +20,7 @@ export default function App() {
     activeTerminalId,
     activeTerminal,
     defaultCwd,
+    chooseCwd,
     createTerminal,
     createAgent,
     setupAgent,
@@ -132,6 +133,17 @@ export default function App() {
       );
     } finally {
       setAgentStarting(false);
+    }
+  }
+
+  async function chooseAgentCwd(currentCwd: string): Promise<string | null> {
+    try {
+      const selectedCwd = await chooseCwd(currentCwd);
+      setAgentError(undefined);
+      return selectedCwd;
+    } catch {
+      setAgentError("The working directory picker could not be opened.");
+      return null;
     }
   }
 
@@ -317,6 +329,7 @@ export default function App() {
           if (!agentStarting) setAgentDialogOpen(false);
         }}
         onStart={(request, cwd) => void startAgent(request, cwd)}
+        onChooseCwd={chooseAgentCwd}
         onOpenAgentSettings={() => openSettings("agents")}
       />
       <SettingsDialog

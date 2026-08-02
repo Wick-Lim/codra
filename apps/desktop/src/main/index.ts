@@ -154,6 +154,18 @@ async function startPrimaryInstance(): Promise<void> {
       registerTerminalIpc({
         ...options,
         listAgents: () => listAgentRuntimes(agentRuntimeDependencies),
+        chooseDirectory: async (parentWindow, defaultPath) => {
+          const result = await dialog.showOpenDialog(
+            parentWindow as BrowserWindow,
+            {
+              title: "Choose agent working directory",
+              buttonLabel: "Choose",
+              defaultPath,
+              properties: ["openDirectory", "createDirectory"],
+            },
+          );
+          return result.canceled ? null : (result.filePaths[0] ?? null);
+        },
         openExternal: (url) => shell.openExternal(url),
       }),
     createLifecycle: (options) => new DesktopLifecycle(options),

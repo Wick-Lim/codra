@@ -163,6 +163,7 @@ function createPaneApi(
     },
     terminal: {
       defaultCwd: vi.fn().mockResolvedValue("/Users/codra"),
+      chooseCwd: vi.fn().mockResolvedValue(null),
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       write: vi.fn().mockResolvedValue(undefined),

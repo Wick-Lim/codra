@@ -112,6 +112,7 @@ describe("createDesktopApi", () => {
     const ipc = new FakeIpcRenderer(
       new Map<string, unknown>([
         [IPC_CHANNELS.terminalDefaultCwd, "/Users/codra"],
+        [IPC_CHANNELS.terminalChooseCwd, "/workspace/selected"],
         [IPC_CHANNELS.terminalList, [descriptor]],
         [IPC_CHANNELS.terminalCreate, descriptor],
         [IPC_CHANNELS.terminalReplay, []],
@@ -120,6 +121,9 @@ describe("createDesktopApi", () => {
     const api = createDesktopApi(ipc);
 
     await expect(api.terminal.defaultCwd()).resolves.toBe("/Users/codra");
+    await expect(api.terminal.chooseCwd("/workspace/codra")).resolves.toBe(
+      "/workspace/selected",
+    );
     await api.terminal.list();
     await api.terminal.create({ cols: 120, rows: 32 });
     await api.terminal.write({ terminalId, data: "pwd\n" });
@@ -129,6 +133,10 @@ describe("createDesktopApi", () => {
 
     expect(ipc.invocations).toEqual([
       { channel: IPC_CHANNELS.terminalDefaultCwd, args: [] },
+      {
+        channel: IPC_CHANNELS.terminalChooseCwd,
+        args: [{ defaultPath: "/workspace/codra" }],
+      },
       { channel: IPC_CHANNELS.terminalList, args: [] },
       {
         channel: IPC_CHANNELS.terminalCreate,

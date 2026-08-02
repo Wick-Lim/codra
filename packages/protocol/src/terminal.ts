@@ -2,6 +2,12 @@ import { z } from "zod";
 
 export const TerminalIdSchema = z.string().uuid();
 export const TerminalCwdSchema = z.string().min(1).max(4096);
+export const ChooseTerminalCwdRequestSchema = z
+  .object({
+    defaultPath: TerminalCwdSchema,
+  })
+  .strict();
+export const ChooseTerminalCwdResultSchema = TerminalCwdSchema.nullable();
 export const TerminalSizeSchema = z.object({
   cols: z.number().int().min(20).max(400),
   rows: z.number().int().min(5).max(200),
@@ -131,6 +137,9 @@ export const ReplayTerminalRequestSchema = z.object({
 });
 
 export type CreateTerminalRequest = z.infer<typeof CreateTerminalRequestSchema>;
+export type ChooseTerminalCwdRequest = z.infer<
+  typeof ChooseTerminalCwdRequestSchema
+>;
 export type AgentKind = z.infer<typeof AgentKindSchema>;
 export type AgentSetupAction = z.infer<typeof AgentSetupActionSchema>;
 export type AgentSetupRequest = z.infer<typeof AgentSetupRequestSchema>;

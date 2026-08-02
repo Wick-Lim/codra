@@ -14,6 +14,7 @@ export interface NewAgentDialogProps {
   error?: string;
   onClose(): void;
   onStart(request: AgentLaunchRequest, cwd: string): void;
+  onChooseCwd(currentCwd: string): Promise<string | null>;
   onOpenAgentSettings?(): void;
 }
 
@@ -46,6 +47,7 @@ export function NewAgentDialog({
   error,
   onClose,
   onStart,
+  onChooseCwd,
   onOpenAgentSettings = () => undefined,
 }: NewAgentDialogProps) {
   const [selectedKind, setSelectedKind] = React.useState<AgentKind>();
@@ -56,7 +58,9 @@ export function NewAgentDialog({
   const [yolo, setYolo] = React.useState(false);
   const [prompt, setPrompt] = React.useState("");
   const [workingDirectory, setWorkingDirectory] = React.useState(initialCwd);
+  const [choosingCwd, setChoosingCwd] = React.useState(false);
   const promptRef = React.useRef<HTMLTextAreaElement>(null);
+  const workingDirectoryId = React.useId();
 
   React.useEffect(() => {
     if (!open) return;
@@ -68,6 +72,7 @@ export function NewAgentDialog({
     setYolo(false);
     setPrompt("");
     setWorkingDirectory(initialCwd);
+    setChoosingCwd(false);
   }, [initialCwd, open]);
 
   React.useEffect(() => {
@@ -128,7 +133,12 @@ export function NewAgentDialog({
     (!selectedRuntime.modelRequired || selectedModel.length > 0),
   );
   const canStart = Boolean(
-    selectedRuntime?.available && firstPrompt && cwd && modelIsValid && !busy,
+    selectedRuntime?.available &&
+    firstPrompt &&
+    cwd &&
+    modelIsValid &&
+    !busy &&
+    !choosingCwd,
   );
 
   function selectRuntime(kind: AgentKind): void {
@@ -267,27 +277,42 @@ export function NewAgentDialog({
                   <small>{prompt.length.toLocaleString()} / 16,000</small>
                 </label>
 
-                <label className="agent-workdir-field">
-                  <span>Working directory</span>
+                <div className="agent-workdir-field">
+                  <label htmlFor={workingDirectoryId}>Working directory</label>
                   <span className="agent-workdir-control">
                     <span className="agent-workdir-prompt" aria-hidden="true">
                       ▸
                     </span>
                     <input
+                      id={workingDirectoryId}
                       required
+                      readOnly
                       aria-label="Working directory"
                       value={workingDirectory}
                       maxLength={4096}
-                      disabled={busy}
+                      disabled={busy || choosingCwd}
                       autoComplete="off"
                       spellCheck={false}
                       placeholder="/path/to/workspace"
-                      onChange={(event) =>
-                        setWorkingDirectory(event.currentTarget.value)
-                      }
                     />
+                    <button
+                      type="button"
+                      aria-label="Choose working directory"
+                      disabled={busy || choosingCwd}
+                      onClick={() => {
+                        setChoosingCwd(true);
+                        void onChooseCwd(cwd)
+                          .then((selectedCwd) => {
+                            if (selectedCwd) setWorkingDirectory(selectedCwd);
+                          })
+                          .catch(() => undefined)
+                          .finally(() => setChoosingCwd(false));
+                      }}
+                    >
+                      {choosingCwd ? "Choosing…" : "Browse…"}
+                    </button>
                   </span>
-                </label>
+                </div>
 
                 {!selectedRuntime.available ? (
                   <div className="agent-install-hint">

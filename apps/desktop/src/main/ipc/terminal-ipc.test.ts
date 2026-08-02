@@ -131,6 +131,9 @@ function createIpcHarness() {
   ];
   const listAgents = vi.fn(() => agents);
   const defaultCwd = vi.fn(() => "/Users/codra");
+  const chooseDirectory = vi.fn(
+    async (): Promise<string | null> => "/workspace/selected",
+  );
   const openExternal = vi.fn(async () => undefined);
   const unregister = registerTerminalIpc({
     ipc,
@@ -139,6 +142,7 @@ function createIpcHarness() {
     isTrustedRendererUrl: (url) => url === trustedRendererUrl,
     listAgents,
     defaultCwd,
+    chooseDirectory,
     openExternal,
   });
 
@@ -151,6 +155,7 @@ function createIpcHarness() {
     manager,
     listAgents,
     defaultCwd,
+    chooseDirectory,
     openExternal,
     windows,
     ipc,
@@ -185,6 +190,31 @@ describe("registerTerminalIpc", () => {
       harness.handlers.invoke(IPC_CHANNELS.terminalDefaultCwd),
     ).resolves.toBe("/Users/codra");
     expect(harness.defaultCwd).toHaveBeenCalledOnce();
+  });
+
+  it("opens a native directory picker owned by the authorized renderer", async () => {
+    const harness = createIpcHarness();
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalChooseCwd, {
+        defaultPath: "/workspace/codra",
+      }),
+    ).resolves.toBe("/workspace/selected");
+    expect(harness.chooseDirectory).toHaveBeenCalledWith(
+      harness.windows[0],
+      "/workspace/codra",
+    );
+  });
+
+  it("preserves cancellation from the native directory picker", async () => {
+    const harness = createIpcHarness();
+    harness.chooseDirectory.mockResolvedValue(null);
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalChooseCwd, {
+        defaultPath: "/workspace/codra",
+      }),
+    ).resolves.toBeNull();
   });
 
   it("returns validated local agent availability to a trusted renderer", async () => {
@@ -275,6 +305,11 @@ describe("registerTerminalIpc", () => {
     const harness = createIpcHarness();
 
     await expect(
+      harness.handlers.invoke(IPC_CHANNELS.terminalChooseCwd, {
+        defaultPath: "",
+      }),
+    ).rejects.toThrow();
+    await expect(
       harness.handlers.invoke(IPC_CHANNELS.terminalWrite, {
         terminalId,
         data: "",
@@ -297,6 +332,7 @@ describe("registerTerminalIpc", () => {
       harness.handlers.invoke(IPC_CHANNELS.terminalClose, "not-a-uuid"),
     ).rejects.toThrow();
 
+    expect(harness.chooseDirectory).not.toHaveBeenCalled();
     expect(harness.manager.write).not.toHaveBeenCalled();
     expect(harness.manager.resize).not.toHaveBeenCalled();
     expect(harness.manager.replay).not.toHaveBeenCalled();
@@ -454,6 +490,9 @@ describe("registerTerminalIpc", () => {
     );
     expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
       IPC_CHANNELS.terminalDefaultCwd,
+    );
+    expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
+      IPC_CHANNELS.terminalChooseCwd,
     );
     expect(harness.ipc.removeHandler).toHaveBeenCalledWith(
       IPC_CHANNELS.terminalList,

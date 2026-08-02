@@ -12,6 +12,7 @@ export interface UseTerminalsResult {
   activeTerminalId: string | null;
   activeTerminal: TerminalDescriptor | null;
   defaultCwd: string;
+  chooseCwd(defaultPath: string): Promise<string | null>;
   createTerminal(): Promise<void>;
   createAgent(request: AgentLaunchRequest, cwd: string): Promise<void>;
   setupAgent(request: AgentSetupRequest): Promise<AgentSetupResult>;
@@ -106,6 +107,11 @@ export function useTerminals(
     setActiveTerminalId(descriptor.id);
   }, [api]);
 
+  const chooseCwd = useCallback(
+    (defaultPath: string) => api.terminal.chooseCwd(defaultPath),
+    [api],
+  );
+
   const createAgent = useCallback(
     async (agent: AgentLaunchRequest, cwd: string) => {
       const descriptor = await api.terminal.create({
@@ -158,6 +164,7 @@ export function useTerminals(
     activeTerminalId,
     activeTerminal,
     defaultCwd,
+    chooseCwd,
     createTerminal,
     createAgent,
     setupAgent,
