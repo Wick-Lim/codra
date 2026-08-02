@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   IPC_CHANNELS,
   type AgentLaunchTarget,
+  type PendingRemoteSession,
   type RemoteAccountStatus,
   type RemoteHostStatus,
   type TerminalDescriptor,
@@ -41,6 +42,14 @@ class FakeIpcRenderer implements IpcRendererLike {
 }
 
 const terminalId = "2a1e20df-860f-4f29-a2c3-b2f28d44c2e5";
+
+const pendingSession: PendingRemoteSession = {
+  sessionId: "3f5f0a02-27b0-4a04-9a2f-6cb2f5d6a111",
+  clientDeviceId: "7c9f1d33-4b62-4f0e-9f4c-1c0b7d2a2222",
+  requesterDisplayName: "Studio Mac",
+  requestedScopes: ["workspace.read", "agent.launch"],
+  expiresAt: 1_785_000_000_000,
+};
 
 const descriptor: TerminalDescriptor = {
   id: terminalId,
@@ -206,6 +215,102 @@ describe("createDesktopApi", () => {
       { channel: IPC_CHANNELS.remoteActivate, args: [] },
       { channel: IPC_CHANNELS.remoteDeactivate, args: [] },
     ]);
+  });
+
+  it("routes pending session approval through its own channels", async () => {
+    const ipc = new FakeIpcRenderer(
+      new Map<string, unknown>([
+        [IPC_CHANNELS.remoteGetPendingSessions, [pendingSession]],
+      ]),
+    );
+    const api = createDesktopApi(ipc);
+    const received: PendingRemoteSession[][] = [];
+    api.remote.onPendingSessionsChanged((sessions) => received.push(sessions));
+
+    await expect(api.remote.getPendingSessions()).resolves.toEqual([
+      pendingSession,
+    ]);
+    await expect(
+      api.remote.approveSession({
+        sessionId: pendingSession.sessionId,
+        approvedScopes: ["workspace.read"],
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      api.remote.rejectSession({ sessionId: pendingSession.sessionId }),
+    ).resolves.toBeUndefined();
+    ipc.emit(IPC_CHANNELS.remotePendingSessions, [
+      { ...pendingSession, requestedScopes: [] },
+    ]);
+    ipc.emit(IPC_CHANNELS.remotePendingSessions, [pendingSession]);
+    ipc.emit(IPC_CHANNELS.remotePendingSessions, []);
+
+    expect(received).toEqual([[pendingSession], []]);
+    expect(ipc.invocations).toEqual([
+      { channel: IPC_CHANNELS.remoteGetPendingSessions, args: [] },
+      {
+        channel: IPC_CHANNELS.remoteApproveSession,
+        args: [
+          {
+            sessionId: pendingSession.sessionId,
+            approvedScopes: ["workspace.read"],
+          },
+        ],
+      },
+      {
+        channel: IPC_CHANNELS.remoteRejectSession,
+        args: [{ sessionId: pendingSession.sessionId }],
+      },
+    ]);
+  });
+
+  it("keeps invalid approval requests off the IPC bridge", async () => {
+    const ipc = new FakeIpcRenderer();
+    const api = createDesktopApi(ipc);
+
+    await expect(
+      api.remote.approveSession({
+        sessionId: pendingSession.sessionId,
+        approvedScopes: [],
+      }),
+    ).rejects.toThrow();
+    await expect(
+      api.remote.rejectSession({ sessionId: "not-a-session-id" }),
+    ).rejects.toThrow();
+
+    expect(ipc.invocations).toEqual([]);
+  });
+
+  it("rejects a non-undefined approval response", async () => {
+    const ipc = new FakeIpcRenderer(
+      new Map<string, unknown>([
+        [IPC_CHANNELS.remoteApproveSession, "unexpected"],
+      ]),
+    );
+
+    await expect(
+      createDesktopApi(ipc).remote.approveSession({
+        sessionId: pendingSession.sessionId,
+        approvedScopes: ["workspace.read"],
+      }),
+    ).rejects.toThrow("Expected IPC mutation response to be undefined");
+  });
+
+  it("unsubscribes only its pending session listener wrapper", () => {
+    const ipc = new FakeIpcRenderer();
+    const api = createDesktopApi(ipc);
+    const first: PendingRemoteSession[][] = [];
+    const second: PendingRemoteSession[][] = [];
+    const stopFirst = api.remote.onPendingSessionsChanged((sessions) =>
+      first.push(sessions),
+    );
+    api.remote.onPendingSessionsChanged((sessions) => second.push(sessions));
+
+    stopFirst();
+    ipc.emit(IPC_CHANNELS.remotePendingSessions, [pendingSession]);
+
+    expect(first).toEqual([]);
+    expect(second).toEqual([[pendingSession]]);
   });
 
   it("routes every terminal invocation through its frozen channel", async () => {

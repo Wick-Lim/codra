@@ -68,6 +68,10 @@ function createDesktopApiFake() {
       deactivate: vi.fn().mockResolvedValue({ state: "idle" }),
       onStateChanged: vi.fn(() => vi.fn()),
       onAuthStateChanged: vi.fn(() => vi.fn()),
+      getPendingSessions: vi.fn().mockResolvedValue([]),
+      approveSession: vi.fn().mockResolvedValue(undefined),
+      rejectSession: vi.fn().mockResolvedValue(undefined),
+      onPendingSessionsChanged: vi.fn(() => vi.fn()),
     },
   };
 

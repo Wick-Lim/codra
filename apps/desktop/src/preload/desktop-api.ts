@@ -5,10 +5,13 @@ import {
   AgentSetupResultSchema,
   AgentTargetConnectRequestSchema,
   AgentTargetRuntimeRequestSchema,
+  ApproveRemoteSessionRequestSchema,
   ChooseTerminalCwdRequestSchema,
   ChooseTerminalCwdResultSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
+  PendingRemoteSessionListSchema,
+  RejectRemoteSessionRequestSchema,
   RemoteAccountStatusSchema,
   RemoteAuthProviderSchema,
   ReplayTerminalRequestSchema,
@@ -249,6 +252,37 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
 
         ipc.on(IPC_CHANNELS.remoteAuthState, wrapped);
         return () => ipc.removeListener(IPC_CHANNELS.remoteAuthState, wrapped);
+      },
+      async getPendingSessions() {
+        return PendingRemoteSessionListSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteGetPendingSessions),
+        );
+      },
+      async approveSession(request) {
+        assertUndefinedResponse(
+          await ipc.invoke(
+            IPC_CHANNELS.remoteApproveSession,
+            ApproveRemoteSessionRequestSchema.parse(request),
+          ),
+        );
+      },
+      async rejectSession(request) {
+        assertUndefinedResponse(
+          await ipc.invoke(
+            IPC_CHANNELS.remoteRejectSession,
+            RejectRemoteSessionRequestSchema.parse(request),
+          ),
+        );
+      },
+      onPendingSessionsChanged(listener) {
+        const wrapped: IpcListener = (_event, payload) => {
+          const parsed = PendingRemoteSessionListSchema.safeParse(payload);
+          if (parsed.success) listener(parsed.data);
+        };
+
+        ipc.on(IPC_CHANNELS.remotePendingSessions, wrapped);
+        return () =>
+          ipc.removeListener(IPC_CHANNELS.remotePendingSessions, wrapped);
       },
     },
   };
