@@ -16,6 +16,7 @@ declare module "@codra/remote-account-bootstrap" {
   export function bootstrapRemoteAccount(
     runtime: FirebaseRuntime,
     options: DesktopLoginBootstrapOptions,
+    parentWindow?: DesktopAuthParentWindowLike,
   ): Promise<DesktopLoginBootstrapResult | undefined>;
 }
 

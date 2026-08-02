@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   bootstrapProductionDesktopLogin: vi.fn(),
   openDesktopAuthWindow: vi.fn(async () => undefined),
   shellOpenExternal: vi.fn(async () => undefined),
+  appFocus: vi.fn(),
 }));
 
 vi.mock("./desktop-login", () => ({
@@ -18,6 +19,7 @@ vi.mock("./auth-window", () => ({
 
 vi.mock("electron", () => ({
   shell: { openExternal: mocks.shellOpenExternal },
+  app: { focus: mocks.appFocus },
 }));
 
 import {
@@ -123,5 +125,51 @@ describe("Google account bootstrap window", () => {
       ),
     ).rejects.toThrow("DESKTOP_LOGIN_CANCELLED");
     expect(parentWindow.focus).toHaveBeenCalledOnce();
+  });
+
+  it("raises the application, not only the window, after sign-in", async () => {
+    const parentWindow = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => true),
+      isVisible: vi.fn(() => false),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    };
+
+    await bootstrapRemoteAuth(
+      { deployment: { mode: "production" } } as never,
+      "google",
+      undefined,
+      parentWindow,
+    );
+
+    expect(parentWindow.restore).toHaveBeenCalledOnce();
+    expect(parentWindow.show).toHaveBeenCalledOnce();
+    expect(parentWindow.focus).toHaveBeenCalledOnce();
+    expect(mocks.appFocus).toHaveBeenCalledWith({ steal: true });
+  });
+
+  it("restores CODRA focus after device registration", async () => {
+    const parentWindow = {
+      isDestroyed: vi.fn(() => false),
+      isMinimized: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    };
+    mocks.bootstrapProductionDesktopLogin.mockResolvedValueOnce({
+      token: "device-token",
+    });
+
+    await bootstrapRemoteAccount(
+      { deployment: { mode: "production" } } as never,
+      {} as never,
+      parentWindow,
+    );
+
+    expect(parentWindow.focus).toHaveBeenCalledOnce();
+    expect(mocks.appFocus).toHaveBeenCalledWith({ steal: true });
   });
 });

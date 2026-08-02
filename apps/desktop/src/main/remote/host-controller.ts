@@ -249,7 +249,9 @@ export class RemoteHostController {
     return this.accountStatus;
   }
 
-  async activate(): Promise<RemoteHostStatus> {
+  async activate(
+    parentWindow: DesktopAuthParentWindowLike,
+  ): Promise<RemoteHostStatus> {
     if (this.status.state === "online") return this.status;
     if (!this.runtime?.auth.currentUser)
       throw new Error("REMOTE_AUTH_REQUIRED");
@@ -259,7 +261,7 @@ export class RemoteHostController {
     }
     this.stopRequested = false;
     this.publishStatus({ state: "activating" });
-    this.startPromise = this.startInternal();
+    this.startPromise = this.startInternal(parentWindow);
     try {
       await this.startPromise;
     } catch (error) {
@@ -338,7 +340,9 @@ export class RemoteHostController {
     this.publishStatus({ state: "idle" });
   }
 
-  private async startInternal(): Promise<void> {
+  private async startInternal(
+    parentWindow: DesktopAuthParentWindowLike,
+  ): Promise<void> {
     const accountRuntime = this.runtime;
     if (!accountRuntime?.auth.currentUser)
       throw new Error("REMOTE_AUTH_REQUIRED");
@@ -351,21 +355,21 @@ export class RemoteHostController {
       const action = identity.created ? "register" : "resume";
       let login;
       try {
-        login = await bootstrapRemoteAccount(accountRuntime, {
-          identity,
-          action,
-          useExistingAuth: true,
-        });
+        login = await bootstrapRemoteAccount(
+          accountRuntime,
+          { identity, action, useExistingAuth: true },
+          parentWindow,
+        );
       } catch (error) {
         // A previous OAuth attempt can persist the local key before its
         // server-side device is created. Recover that interrupted first run
         // by registering the same key instead of requiring manual cleanup.
         if (!shouldRetryDesktopLoginAsRegister(action, error)) throw error;
-        login = await bootstrapRemoteAccount(accountRuntime, {
-          identity,
-          action: "register",
-          useExistingAuth: true,
-        });
+        login = await bootstrapRemoteAccount(
+          accountRuntime,
+          { identity, action: "register", useExistingAuth: true },
+          parentWindow,
+        );
       }
       let device;
       if (login) {

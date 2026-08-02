@@ -1,5 +1,5 @@
 import type { FirebaseRuntime } from "@codra/firebase";
-import { shell } from "electron";
+import { app, shell } from "electron";
 import {
   bootstrapProductionDesktopAuth,
   bootstrapProductionDesktopLogin,
@@ -13,6 +13,7 @@ export const remoteAccountBootstrapBinding = "google-main" as const;
 function revealParentWindow(
   parentWindow: DesktopAuthParentWindowLike | undefined,
 ): void {
+  app.focus({ steal: true });
   if (!parentWindow || parentWindow.isDestroyed()) return;
   if (parentWindow.isMinimized()) parentWindow.restore();
   if (!parentWindow.isVisible()) parentWindow.show();
@@ -48,13 +49,18 @@ export async function bootstrapRemoteAuth(
 export async function bootstrapRemoteAccount(
   runtime: FirebaseRuntime,
   options: DesktopLoginBootstrapOptions,
+  parentWindow?: DesktopAuthParentWindowLike,
 ): Promise<DesktopLoginBootstrapResult> {
   if (runtime.deployment.mode !== "production")
     throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
-  return bootstrapProductionDesktopLogin(runtime, options, {
-    openExternal: (url, callbackUrl) => {
-      if (!callbackUrl) throw new Error("DESKTOP_LOGIN_CALLBACK_URL_MISSING");
-      return shell.openExternal(url);
-    },
-  });
+  try {
+    return await bootstrapProductionDesktopLogin(runtime, options, {
+      openExternal: (url, callbackUrl) => {
+        if (!callbackUrl) throw new Error("DESKTOP_LOGIN_CALLBACK_URL_MISSING");
+        return shell.openExternal(url);
+      },
+    });
+  } finally {
+    revealParentWindow(parentWindow);
+  }
 }

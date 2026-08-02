@@ -25,8 +25,10 @@ export async function bootstrapRemoteAuth(
 export async function bootstrapRemoteAccount(
   runtime: FirebaseRuntime,
   options: DesktopLoginBootstrapOptions,
+  parentWindow?: DesktopAuthParentWindowLike,
 ): Promise<undefined> {
   void options;
+  void parentWindow;
   const email = process.env.CODRA_REMOTE_TEST_EMAIL;
   const password = process.env.CODRA_REMOTE_TEST_PASSWORD;
   if (!email || !password)

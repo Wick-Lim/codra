@@ -41,7 +41,9 @@ export interface RemoteHostControllerPort {
     parentWindow: DesktopAuthParentWindowLike,
   ): Promise<RemoteAccountStatus>;
   logout(): Promise<RemoteAccountStatus>;
-  activate(): Promise<RemoteHostStatus>;
+  activate(
+    parentWindow: DesktopAuthParentWindowLike,
+  ): Promise<RemoteHostStatus>;
   deactivate(): Promise<RemoteHostStatus>;
   onStatusChanged(listener: (status: RemoteHostStatus) => void): () => void;
   onAccountStatusChanged(
@@ -255,8 +257,10 @@ export function registerRemoteIpc({
     [
       IPC_CHANNELS.remoteActivate,
       async (event) => {
-        authorize(event);
-        return RemoteHostStatusSchema.parse(await controller.activate());
+        const parentWindow = authorize(event);
+        return RemoteHostStatusSchema.parse(
+          await controller.activate(parentWindow),
+        );
       },
     ],
     [

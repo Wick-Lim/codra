@@ -7,6 +7,7 @@ import {
   type RemoteHostStatus,
 } from "@codra/protocol";
 import { registerRemoteIpc } from "./remote-ipc";
+import type { DesktopAuthParentWindowLike } from "../remote/auth-window";
 
 type Handler = (event: unknown, payload?: unknown) => unknown;
 
@@ -75,7 +76,8 @@ function controller() {
       accountListener?.(accountStatus);
       return accountStatus;
     }),
-    activate: vi.fn(async () => {
+    activate: vi.fn(async (parentWindow: DesktopAuthParentWindowLike) => {
+      void parentWindow;
       status = { state: "online" };
       listener?.(status);
       return status;
@@ -188,6 +190,7 @@ describe("registerRemoteIpc", () => {
       ipc.handlers.get(IPC_CHANNELS.remoteActivate)?.(client.event),
     ).resolves.toEqual({ state: "online" });
     expect(host.activate).toHaveBeenCalledOnce();
+    expect(host.activate).toHaveBeenCalledWith(client.window);
     expect(client.sends.at(-1)).toEqual({
       channel: IPC_CHANNELS.remoteState,
       payload: { state: "online" },
