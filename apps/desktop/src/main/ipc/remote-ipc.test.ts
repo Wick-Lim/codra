@@ -29,7 +29,15 @@ function sender() {
   };
   return {
     event: { sender: webContents, senderFrame: webContents.mainFrame },
-    window: { webContents, isDestroyed: () => false },
+    window: {
+      webContents,
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      isVisible: () => true,
+      restore: vi.fn(),
+      show: vi.fn(),
+      focus: vi.fn(),
+    },
     sends,
   };
 }
@@ -120,6 +128,7 @@ describe("registerRemoteIpc", () => {
       },
     });
     expect(host.login).toHaveBeenCalledOnce();
+    expect(host.login).toHaveBeenCalledWith("google", client.window);
     expect(client.sends).toEqual([
       {
         channel: IPC_CHANNELS.remoteAuthState,

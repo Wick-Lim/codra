@@ -12,13 +12,17 @@ import {
   type BrowserWindowLike,
 } from "./renderer-authorization";
 import type { IpcMainLike } from "./terminal-ipc";
+import type { DesktopAuthParentWindowLike } from "../remote/auth-window";
 
 type RemoteIpcHandler = (event: unknown, payload?: unknown) => unknown;
 
 export interface RemoteHostControllerPort {
   getStatus(): RemoteHostStatus;
   getAccountStatus(): RemoteAccountStatus;
-  login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus>;
+  login(
+    provider: RemoteAuthProvider,
+    parentWindow: DesktopAuthParentWindowLike,
+  ): Promise<RemoteAccountStatus>;
   logout(): Promise<RemoteAccountStatus>;
   activate(): Promise<RemoteHostStatus>;
   deactivate(): Promise<RemoteHostStatus>;
@@ -31,10 +35,12 @@ export interface RemoteHostControllerPort {
 export interface RegisterRemoteIpcOptions {
   ipc: IpcMainLike;
   controller: RemoteHostControllerPort;
-  windows(): readonly BrowserWindowLike[];
+  windows(): readonly RemoteIpcWindowLike[];
   isTrustedRendererUrl(url: string): boolean;
   reportError?(error: unknown): void;
 }
+
+type RemoteIpcWindowLike = BrowserWindowLike & DesktopAuthParentWindowLike;
 
 function sendToLiveWindows(
   windows: () => readonly BrowserWindowLike[],
@@ -93,7 +99,7 @@ export function registerRemoteIpc({
   isTrustedRendererUrl,
   reportError = (error) => console.error("Remote IPC error", error),
 }: RegisterRemoteIpcOptions): () => void {
-  const authorize = (event: unknown): void =>
+  const authorize = (event: unknown): RemoteIpcWindowLike =>
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   const registrations: readonly [string, RemoteIpcHandler][] = [
     [
@@ -113,9 +119,12 @@ export function registerRemoteIpc({
     [
       IPC_CHANNELS.remoteLogin,
       async (event, provider) => {
-        authorize(event);
+        const parentWindow = authorize(event);
         return RemoteAccountStatusSchema.parse(
-          await controller.login(RemoteAuthProviderSchema.parse(provider)),
+          await controller.login(
+            RemoteAuthProviderSchema.parse(provider),
+            parentWindow,
+          ),
         );
       },
     ],

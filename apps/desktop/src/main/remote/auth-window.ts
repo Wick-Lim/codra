@@ -1,4 +1,5 @@
 import { BrowserWindow, type BrowserWindowConstructorOptions } from "electron";
+import { CODRA_PROJECT_ID } from "@codra/protocol";
 
 export interface DesktopAuthParentWindowLike {
   isDestroyed(): boolean;
@@ -26,7 +27,7 @@ export interface DesktopAuthWindowLike {
 }
 
 export interface DesktopAuthWindowOptions {
-  parent?: DesktopAuthParentWindowLike;
+  parent: DesktopAuthParentWindowLike;
   modal: boolean;
   show: boolean;
   width: number;
@@ -46,19 +47,17 @@ export interface DesktopAuthWindowOptions {
 }
 
 export interface DesktopAuthWindowDependencies {
-  getParentWindow(): DesktopAuthParentWindowLike | undefined;
   createWindow(options: DesktopAuthWindowOptions): DesktopAuthWindowLike;
 }
 
 export interface OpenDesktopAuthWindowOptions {
+  authHandlerUrl?: string;
   dependencies?: DesktopAuthWindowDependencies;
+  parent?: DesktopAuthParentWindowLike;
   signal?: AbortSignal;
 }
 
 const productionDependencies: DesktopAuthWindowDependencies = {
-  getParentWindow: () =>
-    BrowserWindow.getFocusedWindow() ??
-    BrowserWindow.getAllWindows().find((window) => !window.isDestroyed()),
   createWindow: (options) =>
     new BrowserWindow(
       options as BrowserWindowConstructorOptions,
@@ -91,6 +90,30 @@ function isLoopbackCallback(value: string, callbackUrl: URL): boolean {
     url.port === callbackUrl.port &&
     url.pathname === callbackUrl.pathname &&
     url.hash === "" &&
+    url.username === "" &&
+    url.password === ""
+  );
+}
+
+function isValidAuthHandlerTarget(url: URL): boolean {
+  return (
+    url.protocol === "https:" &&
+    url.hostname === `${CODRA_PROJECT_ID}.firebaseapp.com` &&
+    url.pathname === "/__/auth/handler" &&
+    url.search === "" &&
+    url.hash === "" &&
+    url.username === "" &&
+    url.password === ""
+  );
+}
+
+function isAuthHandlerNavigation(value: string, authHandlerUrl: URL): boolean {
+  const url = parseUrl(value);
+  return (
+    url?.protocol === authHandlerUrl.protocol &&
+    url.hostname === authHandlerUrl.hostname &&
+    url.port === authHandlerUrl.port &&
+    url.pathname === authHandlerUrl.pathname &&
     url.username === "" &&
     url.password === ""
   );
@@ -145,19 +168,27 @@ export function openDesktopAuthWindow(
 ): Promise<void> {
   const dependencies = options.dependencies ?? productionDependencies;
   const callbackUrl = parseUrl(callbackUrlValue);
+  const authHandlerUrl = options.authHandlerUrl
+    ? parseUrl(options.authHandlerUrl)
+    : undefined;
   if (
     !isGoogleAccountUrl(authUrl) ||
     !callbackUrl ||
     !isValidCallbackTarget(callbackUrl) ||
-    !isLoopbackCallback(callbackUrlValue, callbackUrl)
+    !isLoopbackCallback(callbackUrlValue, callbackUrl) ||
+    !authHandlerUrl ||
+    !isValidAuthHandlerTarget(authHandlerUrl)
   ) {
     return Promise.reject(new Error("DESKTOP_LOGIN_AUTH_URL_INVALID"));
   }
 
-  const parent = dependencies.getParentWindow();
+  const parent = options.parent;
+  if (!parent || parent.isDestroyed()) {
+    return Promise.reject(new Error("DESKTOP_LOGIN_PARENT_WINDOW_MISSING"));
+  }
   const child = dependencies.createWindow({
-    ...(parent ? { parent } : {}),
-    modal: Boolean(parent),
+    parent,
+    modal: true,
     show: false,
     width: 520,
     height: 720,
@@ -199,7 +230,11 @@ export function openDesktopAuthWindow(
       event: { preventDefault(): void },
       url: string,
     ): void => {
-      if (!isGoogleAccountUrl(url) && !isLoopbackCallback(url, callbackUrl))
+      if (
+        !isGoogleAccountUrl(url) &&
+        !isAuthHandlerNavigation(url, authHandlerUrl) &&
+        !isLoopbackCallback(url, callbackUrl)
+      )
         event.preventDefault();
     };
 

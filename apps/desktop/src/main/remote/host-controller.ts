@@ -27,6 +27,7 @@ import {
   remoteSignedInStatus,
 } from "./remote-state";
 import { shouldRetryDesktopLoginAsRegister } from "./desktop-login";
+import type { DesktopAuthParentWindowLike } from "./auth-window";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 
@@ -79,7 +80,10 @@ export class RemoteHostController {
     return () => this.accountStatusListeners.delete(listener);
   }
 
-  async login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus> {
+  async login(
+    provider: RemoteAuthProvider,
+    parentWindow: DesktopAuthParentWindowLike,
+  ): Promise<RemoteAccountStatus> {
     if (
       this.accountStatus.state === "signed_in" &&
       this.runtime?.auth.currentUser
@@ -96,7 +100,12 @@ export class RemoteHostController {
     this.stopRequested = false;
     const generation = ++this.authGeneration;
     const abort = new AbortController();
-    const authPromise = this.loginInternal(provider, generation, abort.signal);
+    const authPromise = this.loginInternal(
+      provider,
+      generation,
+      abort.signal,
+      parentWindow,
+    );
     this.authAbort = abort;
     this.authPromise = authPromise;
     try {
@@ -190,9 +199,10 @@ export class RemoteHostController {
     provider: RemoteAuthProvider,
     generation: number,
     signal: AbortSignal,
+    parentWindow: DesktopAuthParentWindowLike,
   ): Promise<void> {
     const runtime = this.runtime ?? createRemoteFirebaseRuntime();
-    await bootstrapRemoteAuth(runtime, provider, signal);
+    await bootstrapRemoteAuth(runtime, provider, signal, parentWindow);
     if (
       signal.aborted ||
       generation !== this.authGeneration ||

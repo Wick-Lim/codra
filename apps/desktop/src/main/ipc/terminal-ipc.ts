@@ -109,8 +109,9 @@ export function registerTerminalIpc({
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
   const activeSetups = new Map<AgentKind, string | null>();
-  const authorize = (event: unknown): void =>
+  const authorize = (event: unknown): void => {
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
+  };
   const registrations: readonly [string, IpcHandler][] = [
     [
       IPC_CHANNELS.agentList,

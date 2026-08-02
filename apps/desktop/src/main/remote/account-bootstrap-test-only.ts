@@ -1,6 +1,7 @@
 import { signInWithEmailAndPassword } from "firebase/auth";
 import type { FirebaseRuntime } from "@codra/firebase";
 import type { DesktopLoginBootstrapOptions } from "./desktop-login";
+import type { DesktopAuthParentWindowLike } from "./auth-window";
 
 export const remoteAccountBootstrapBinding = "password-test-only-main" as const;
 
@@ -8,7 +9,9 @@ export async function bootstrapRemoteAuth(
   runtime: FirebaseRuntime,
   provider: "google" | "email_password",
   signal?: AbortSignal,
+  parentWindow?: DesktopAuthParentWindowLike,
 ): Promise<void> {
+  void parentWindow;
   if (signal?.aborted) throw new Error("REMOTE_LOGIN_CANCELLED");
   if (provider !== "email_password")
     throw new Error("AUTH_PROVIDER_UNAVAILABLE");

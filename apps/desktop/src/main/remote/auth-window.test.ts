@@ -7,6 +7,7 @@ import {
 
 type WindowEvent = "ready-to-show" | "closed";
 type NavigationEvent = "will-navigate" | "will-redirect" | "did-navigate";
+const AUTH_HANDLER_URL = "https://codra-1b3bb.firebaseapp.com/__/auth/handler";
 
 function createHarness() {
   const windowListeners = new Map<WindowEvent, () => void>();
@@ -49,7 +50,6 @@ function createHarness() {
   } satisfies DesktopAuthWindowLike;
   const createWindow = vi.fn(() => child);
   const dependencies: DesktopAuthWindowDependencies = {
-    getParentWindow: () => parent,
     createWindow,
   };
 
@@ -71,7 +71,11 @@ describe("desktop OAuth child window", () => {
       openDesktopAuthWindow(
         "https://example.com/fake-google-login",
         "http://127.0.0.1:45831/auth/callback",
-        { dependencies: harness.dependencies },
+        {
+          authHandlerUrl: AUTH_HANDLER_URL,
+          dependencies: harness.dependencies,
+          parent: harness.parent,
+        },
       ),
     ).rejects.toThrow("DESKTOP_LOGIN_AUTH_URL_INVALID");
     expect(harness.createWindow).not.toHaveBeenCalled();
@@ -84,9 +88,28 @@ describe("desktop OAuth child window", () => {
       openDesktopAuthWindow(
         "https://accounts.google.com/o/oauth2/v2/auth",
         "http://127.0.0.1:45831/not-codra",
-        { dependencies: harness.dependencies },
+        {
+          authHandlerUrl: AUTH_HANDLER_URL,
+          dependencies: harness.dependencies,
+          parent: harness.parent,
+        },
       ),
     ).rejects.toThrow("DESKTOP_LOGIN_AUTH_URL_INVALID");
+    expect(harness.createWindow).not.toHaveBeenCalled();
+  });
+
+  it("refuses to open as a standalone provider window when CODRA has no live parent", async () => {
+    const harness = createHarness();
+    const opened = openDesktopAuthWindow(
+      "https://accounts.google.com/o/oauth2/v2/auth",
+      "http://127.0.0.1:45831/auth/callback",
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+      },
+    );
+
+    await expect(opened).rejects.toThrow("DESKTOP_LOGIN_PARENT_WINDOW_MISSING");
     expect(harness.createWindow).not.toHaveBeenCalled();
   });
 
@@ -96,7 +119,9 @@ describe("desktop OAuth child window", () => {
       "https://accounts.google.com/o/oauth2/v2/auth?client_id=codra";
     const callbackUrl = "http://127.0.0.1:45831/auth/callback";
     const opened = openDesktopAuthWindow(authUrl, callbackUrl, {
+      authHandlerUrl: AUTH_HANDLER_URL,
       dependencies: harness.dependencies,
+      parent: harness.parent,
     });
 
     expect(harness.createWindow).toHaveBeenCalledWith(
@@ -136,7 +161,11 @@ describe("desktop OAuth child window", () => {
     const opened = openDesktopAuthWindow(
       "https://accounts.google.com/o/oauth2/v2/auth",
       callbackUrl,
-      { dependencies: harness.dependencies },
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+        parent: harness.parent,
+      },
     );
     const preventDefault = vi.fn();
 
@@ -157,12 +186,43 @@ describe("desktop OAuth child window", () => {
     await opened;
   });
 
+  it("keeps Firebase's OAuth handler redirect inside the same CODRA child", async () => {
+    const harness = createHarness();
+    const callbackUrl = "http://127.0.0.1:45831/auth/callback";
+    const opened = openDesktopAuthWindow(
+      "https://accounts.google.com/o/oauth2/v2/auth",
+      callbackUrl,
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+        parent: harness.parent,
+      },
+    );
+    const preventDefault = vi.fn();
+
+    harness.navigationListeners.get("will-redirect")?.(
+      { preventDefault },
+      "https://codra-1b3bb.firebaseapp.com/__/auth/handler?state=google-state",
+    );
+
+    expect(preventDefault).not.toHaveBeenCalled();
+    harness.navigationListeners.get("did-navigate")?.(
+      { preventDefault: vi.fn() },
+      `${callbackUrl}?code=google-code&state=opaque-state`,
+    );
+    await opened;
+  });
+
   it("rejects immediately when the user closes the provider window", async () => {
     const harness = createHarness();
     const opened = openDesktopAuthWindow(
       "https://accounts.google.com/o/oauth2/v2/auth",
       "http://127.0.0.1:45831/auth/callback",
-      { dependencies: harness.dependencies },
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+        parent: harness.parent,
+      },
     );
 
     harness.windowListeners.get("closed")?.();
@@ -177,7 +237,11 @@ describe("desktop OAuth child window", () => {
     const opened = openDesktopAuthWindow(
       "https://accounts.google.com/o/oauth2/v2/auth",
       callbackUrl,
-      { dependencies: harness.dependencies },
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+        parent: harness.parent,
+      },
     );
 
     harness.navigationListeners.get("did-navigate")?.(
@@ -196,7 +260,12 @@ describe("desktop OAuth child window", () => {
     const opened = openDesktopAuthWindow(
       "https://accounts.google.com/o/oauth2/v2/auth",
       "http://127.0.0.1:45831/auth/callback",
-      { dependencies: harness.dependencies, signal: abort.signal },
+      {
+        authHandlerUrl: AUTH_HANDLER_URL,
+        dependencies: harness.dependencies,
+        parent: harness.parent,
+        signal: abort.signal,
+      },
     );
 
     abort.abort();

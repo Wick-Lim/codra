@@ -4,12 +4,14 @@ declare module "@codra/remote-account-bootstrap" {
     DesktopLoginBootstrapOptions,
     DesktopLoginBootstrapResult,
   } from "./desktop-login";
+  import type { DesktopAuthParentWindowLike } from "./auth-window";
 
   export const remoteAccountBootstrapBinding: string;
   export function bootstrapRemoteAuth(
     runtime: FirebaseRuntime,
     provider: "google" | "email_password",
     signal?: AbortSignal,
+    parentWindow?: DesktopAuthParentWindowLike,
   ): Promise<void>;
   export function bootstrapRemoteAccount(
     runtime: FirebaseRuntime,

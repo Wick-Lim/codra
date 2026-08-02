@@ -19,11 +19,11 @@ export interface BrowserWindowLike {
   readonly webContents?: IpcSenderWebContentsLike;
 }
 
-export function assertAuthorizedRenderer(
+export function assertAuthorizedRenderer<TWindow extends BrowserWindowLike>(
   rawEvent: unknown,
-  windows: () => readonly BrowserWindowLike[],
+  windows: () => readonly TWindow[],
   isTrustedRendererUrl: (url: string) => boolean,
-): void {
+): TWindow {
   try {
     const event = rawEvent as IpcInvokeEventLike;
     const sender = event?.sender;
@@ -39,15 +39,16 @@ export function assertAuthorizedRenderer(
       throw new Error("Unauthorized terminal IPC sender");
     }
 
-    const ownedByLiveWindow = windows().some(
+    const owner = windows().find(
       (window) =>
         !window.isDestroyed?.() &&
         window.webContents === sender &&
         !window.webContents.isDestroyed(),
     );
-    if (!ownedByLiveWindow) {
+    if (!owner) {
       throw new Error("Unauthorized terminal IPC sender");
     }
+    return owner;
   } catch {
     throw new Error("Unauthorized terminal IPC sender");
   }

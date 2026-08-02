@@ -23,6 +23,17 @@ vi.mock("firebase/auth", () => ({
 
 import { RemoteHostController } from "./host-controller";
 
+function parentWindow() {
+  return {
+    isDestroyed: vi.fn(() => false),
+    isMinimized: vi.fn(() => false),
+    isVisible: vi.fn(() => true),
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+  };
+}
+
 describe("RemoteHostController account lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -58,7 +69,7 @@ describe("RemoteHostController account lifecycle", () => {
       reportError: vi.fn(),
     });
 
-    const login = controller.login("google");
+    const login = controller.login("google", parentWindow());
     await vi.waitFor(() => expect(finishAuth).toBeTypeOf("function"));
     await expect(controller.logout()).resolves.toEqual({
       state: "signed_out",
@@ -68,5 +79,38 @@ describe("RemoteHostController account lifecycle", () => {
 
     await expect(login).rejects.toThrow("REMOTE_LOGIN_CANCELLED");
     expect(controller.getAccountStatus()).toEqual({ state: "signed_out" });
+  });
+
+  it("carries the invoking CODRA window into the OAuth bootstrap", async () => {
+    const auth = {
+      currentUser: null as null | {
+        displayName: string;
+        email: string;
+        photoURL: null;
+      },
+    };
+    const runtime = { auth };
+    const loginParent = parentWindow();
+    mocks.createRemoteFirebaseRuntime.mockReturnValue(runtime);
+    mocks.bootstrapRemoteAuth.mockImplementation(async () => {
+      auth.currentUser = {
+        displayName: "CODRA Operator",
+        email: "operator@example.com",
+        photoURL: null,
+      };
+    });
+    const controller = new RemoteHostController({
+      userDataPath: "/tmp/codra-host-controller-test",
+      reportError: vi.fn(),
+    });
+
+    await controller.login("google", loginParent);
+
+    expect(mocks.bootstrapRemoteAuth).toHaveBeenCalledWith(
+      runtime,
+      "google",
+      expect.any(AbortSignal),
+      loginParent,
+    );
   });
 });
