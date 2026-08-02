@@ -97,7 +97,7 @@ const agents: AgentRuntime[] = [
 const cancelCwdSelection = async (): Promise<null> => null;
 
 describe("NewAgentDialog", () => {
-  it("places global task and workspace before compact runtime configuration", async () => {
+  it("keeps the prompt dominant with compact target, workspace, and YOLO controls directly below", async () => {
     render(
       <NewAgentDialog
         open
@@ -113,13 +113,17 @@ describe("NewAgentDialog", () => {
     const prompt = await screen.findByRole("textbox", {
       name: "First prompt",
     });
-    const workdir = screen.getByRole("textbox", {
-      name: "Working directory",
+    const device = screen.getByRole("combobox", { name: "Device" });
+    const workspace = screen.getByRole("button", {
+      name: "Working directory on This Mac: /workspace/codra",
     });
+    const yolo = screen.getByRole("switch", { name: "YOLO mode" });
+    const yoloHelp = screen.getByRole("button", { name: "About YOLO mode" });
     const agent = screen.getByRole("combobox", { name: "Agent" });
     const model = screen.getByRole("combobox", { name: "Model" });
-    expect(workdir).toHaveValue("/workspace/codra");
-    expect(workdir).toHaveAttribute("readonly");
+    expect(device).toHaveValue("local");
+    expect(workspace).toHaveTextContent("codra");
+    expect(workspace).toHaveAttribute("title", "This Mac · /workspace/codra");
     expect(
       screen
         .getByRole("region", { name: "Task and workspace" })
@@ -133,17 +137,34 @@ describe("NewAgentDialog", () => {
     await vi.waitFor(() => expect(prompt).toHaveFocus());
     expect(prompt).toBeRequired();
     expect(
-      prompt.compareDocumentPosition(workdir) &
+      prompt.compareDocumentPosition(device) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      device.compareDocumentPosition(workspace) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      workdir.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING,
+      workspace.compareDocumentPosition(yolo) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      yolo.compareDocumentPosition(yoloHelp) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      yoloHelp.compareDocumentPosition(agent) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
       agent.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByRole("searchbox")).toBeNull();
     expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    expect(
+      screen.queryByRole("textbox", { name: "Working directory" }),
+    ).toBeNull();
+    expect(
+      screen.queryByText(/Skip approval prompts and allow unrestricted/u),
+    ).toBeNull();
   });
 
   it("routes a missing runtime to settings without starting setup or an agent", async () => {
@@ -188,17 +209,20 @@ describe("NewAgentDialog", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "New agent" })).toBeVisible();
-    const workingDirectory = screen.getByRole("textbox", {
-      name: "Working directory",
-    });
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose working directory" }),
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /workspace/codra",
+      }),
     );
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Agent" }),
       "claude",
     );
-    expect(workingDirectory).toHaveValue("/workspace/auth");
+    expect(
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /workspace/auth",
+      }),
+    ).toHaveTextContent("auth");
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
       "sonnet",
@@ -209,7 +233,6 @@ describe("NewAgentDialog", () => {
     );
     await userEvent.click(screen.getByRole("switch", { name: "YOLO mode" }));
     expect(onChooseCwd).toHaveBeenCalledWith("/workspace/codra");
-    expect(workingDirectory).toHaveValue("/workspace/auth");
     await userEvent.type(
       screen.getByRole("textbox", { name: "First prompt" }),
       "  Fix the auth callback  ",
@@ -242,13 +265,17 @@ describe("NewAgentDialog", () => {
     );
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose working directory" }),
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /workspace/codra",
+      }),
     );
 
     expect(onChooseCwd).toHaveBeenCalledWith("/workspace/codra");
     expect(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    ).toHaveValue("/workspace/codra");
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /workspace/codra",
+      }),
+    ).toHaveTextContent("codra");
   });
 
   it("uses a compact scalable selector and exposes unavailable runtime guidance", async () => {
@@ -293,7 +320,7 @@ describe("NewAgentDialog", () => {
     expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
   });
 
-  it("requires and submits an Ollama model without showing YOLO", async () => {
+  it("requires and submits an Ollama model with unsupported YOLO disabled", async () => {
     const onStart = vi.fn();
     render(
       <NewAgentDialog
@@ -310,7 +337,13 @@ describe("NewAgentDialog", () => {
       screen.getByRole("combobox", { name: "Agent" }),
       "ollama",
     );
-    expect(screen.queryByRole("switch", { name: "YOLO mode" })).toBeNull();
+    expect(screen.getByRole("switch", { name: "YOLO mode" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "About YOLO mode" }),
+    ).toHaveAttribute(
+      "data-tooltip",
+      expect.stringContaining("does not support"),
+    );
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Model" }),
       "qwen3-coder:latest",
@@ -412,11 +445,33 @@ describe("NewAgentDialog", () => {
       await screen.findByRole("textbox", { name: "First prompt" }),
     ).toBeVisible();
     expect(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    ).toHaveValue("/workspace/codra");
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /workspace/codra",
+      }),
+    ).toHaveTextContent("codra");
     expect(screen.getByRole("combobox", { name: "Agent" })).toBeDisabled();
     expect(screen.getByText("No agent runtime detected.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Start agent" })).toBeDisabled();
+  });
+
+  it("shows only the final folder name for Windows workspaces", async () => {
+    render(
+      <NewAgentDialog
+        open
+        agents={agents}
+        initialCwd="C:\\workspace\\codra\\"
+        onClose={vi.fn()}
+        onStart={vi.fn()}
+        onChooseCwd={cancelCwdSelection}
+      />,
+    );
+
+    const workspace = screen.getByRole("button", {
+      name: /Working directory on This Mac/u,
+    });
+    expect(workspace).toHaveTextContent("codra");
+    expect(workspace.getAttribute("title")).toContain("C:");
+    expect(workspace.getAttribute("title")).toContain("codra");
   });
 
   it("requires a first prompt before starting", async () => {

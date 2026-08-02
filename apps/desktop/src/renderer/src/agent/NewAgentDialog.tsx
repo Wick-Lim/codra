@@ -1,37 +1,41 @@
 import type {
   AgentKind,
+  AgentLaunchTarget,
   AgentLaunchRequest,
   AgentRuntime,
 } from "@codra/protocol";
+import { workspacePathLabel } from "@codra/protocol";
 import React from "react";
 import { ModalDialog } from "../components/ModalDialog";
 
 export interface NewAgentDialogProps {
   open: boolean;
   agents: readonly AgentRuntime[];
+  targets?: readonly AgentLaunchTarget[];
   initialCwd: string;
   busy?: boolean;
   error?: string;
   onClose(): void;
   onStart(request: AgentLaunchRequest, cwd: string): void;
   onChooseCwd(currentCwd: string): Promise<string | null>;
+  onTargetChange?(target: AgentLaunchTarget): void;
   onOpenAgentSettings?(): void;
 }
 
 const CUSTOM_MODEL = "__custom__";
 type RuntimeValues = Partial<Record<AgentKind, string>>;
 
-function agentGlyph(kind: AgentKind): string {
-  switch (kind) {
-    case "codex":
-      return ">_";
-    case "claude":
-      return "C";
-    case "gemini":
-      return "G";
-    case "ollama":
-      return "O";
-  }
+const LOCAL_TARGET: AgentLaunchTarget = {
+  target: { kind: "local" },
+  state: "connected",
+};
+
+function targetKey(target: AgentLaunchTarget["target"]): string {
+  return target.kind === "local" ? "local" : `remote:${target.deviceId}`;
+}
+
+function targetLabel(target: AgentLaunchTarget["target"]): string {
+  return target.kind === "local" ? "This Mac" : target.displayName;
 }
 
 function initialModel(runtime: AgentRuntime): string {
@@ -42,12 +46,14 @@ function initialModel(runtime: AgentRuntime): string {
 export function NewAgentDialog({
   open,
   agents,
+  targets = [LOCAL_TARGET],
   initialCwd,
   busy = false,
   error,
   onClose,
   onStart,
   onChooseCwd,
+  onTargetChange = () => undefined,
   onOpenAgentSettings = () => undefined,
 }: NewAgentDialogProps) {
   const [selectedKind, setSelectedKind] = React.useState<AgentKind>();
@@ -58,8 +64,17 @@ export function NewAgentDialog({
   const [prompt, setPrompt] = React.useState("");
   const [workingDirectory, setWorkingDirectory] = React.useState(initialCwd);
   const [choosingCwd, setChoosingCwd] = React.useState(false);
+  const [selectedTargetKey, setSelectedTargetKey] = React.useState("local");
   const promptRef = React.useRef<HTMLTextAreaElement>(null);
-  const workingDirectoryId = React.useId();
+
+  const launchTargets = targets.length > 0 ? targets : [LOCAL_TARGET];
+  const selectedTarget =
+    launchTargets.find(
+      ({ target }) => targetKey(target) === selectedTargetKey,
+    ) ??
+    launchTargets[0] ??
+    LOCAL_TARGET;
+  const selectedTargetLabel = targetLabel(selectedTarget.target);
 
   React.useEffect(() => {
     if (!open) return;
@@ -71,6 +86,13 @@ export function NewAgentDialog({
     setPrompt("");
     setWorkingDirectory(initialCwd);
     setChoosingCwd(false);
+    setSelectedTargetKey(
+      targetKey(
+        launchTargets.find(({ target }) => target.kind === "local")?.target ??
+          launchTargets[0]?.target ??
+          LOCAL_TARGET.target,
+      ),
+    );
   }, [initialCwd, open]);
 
   React.useEffect(() => {
@@ -125,6 +147,8 @@ export function NewAgentDialog({
   );
   const canStart = Boolean(
     selectedRuntime?.available &&
+    selectedTarget.state === "connected" &&
+    selectedTarget.target.kind === "local" &&
     firstPrompt &&
     cwd &&
     modelIsValid &&
@@ -184,28 +208,55 @@ export function NewAgentDialog({
               <small>{prompt.length.toLocaleString()} / 16,000</small>
             </label>
 
-            <div className="agent-workdir-field">
-              <label htmlFor={workingDirectoryId}>Working directory</label>
-              <span className="agent-workdir-control">
-                <span className="agent-workdir-prompt" aria-hidden="true">
-                  ▸
-                </span>
-                <input
-                  id={workingDirectoryId}
-                  required
-                  readOnly
-                  aria-label="Working directory"
-                  value={workingDirectory}
-                  maxLength={4096}
-                  disabled={busy || choosingCwd}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="/path/to/workspace"
-                />
+            <div className="agent-launch-context">
+              <div className="agent-context-chips">
+                <label className="agent-target-chip">
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <rect x="2" y="2.5" width="12" height="8.5" rx="1.5" />
+                    <path d="M6 13.5h4M8 11v2.5" />
+                  </svg>
+                  <select
+                    aria-label="Device"
+                    value={targetKey(selectedTarget.target)}
+                    disabled={busy || launchTargets.length === 1}
+                    onChange={(event) => {
+                      const next = launchTargets.find(
+                        ({ target }) =>
+                          targetKey(target) === event.currentTarget.value,
+                      );
+                      if (!next) return;
+                      setSelectedTargetKey(targetKey(next.target));
+                      setYolo(false);
+                      onTargetChange(next);
+                    }}
+                  >
+                    {launchTargets.map((launchTarget) => (
+                      <option
+                        value={targetKey(launchTarget.target)}
+                        key={targetKey(launchTarget.target)}
+                      >
+                        {targetLabel(launchTarget.target)}
+                        {launchTarget.state === "connected"
+                          ? ""
+                          : ` — ${launchTarget.state.replaceAll("_", " ")}`}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="agent-chip-chevron" aria-hidden="true">
+                    ⌄
+                  </span>
+                </label>
+
                 <button
+                  className="agent-workspace-chip"
                   type="button"
-                  aria-label="Choose working directory"
-                  disabled={busy || choosingCwd}
+                  title={`${selectedTargetLabel} · ${workingDirectory}`}
+                  aria-label={`Working directory on ${selectedTargetLabel}: ${workingDirectory}`}
+                  disabled={
+                    busy ||
+                    choosingCwd ||
+                    selectedTarget.target.kind !== "local"
+                  }
                   onClick={() => {
                     setChoosingCwd(true);
                     void onChooseCwd(cwd)
@@ -216,9 +267,53 @@ export function NewAgentDialog({
                       .finally(() => setChoosingCwd(false));
                   }}
                 >
-                  {choosingCwd ? "Choosing…" : "Browse…"}
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M1.75 4.25h4l1.1 1.5h7.4v6.5H1.75z" />
+                  </svg>
+                  <span>
+                    {choosingCwd
+                      ? "Choosing…"
+                      : workingDirectory
+                        ? workspacePathLabel(workingDirectory)
+                        : "Choose folder"}
+                  </span>
                 </button>
-              </span>
+              </div>
+
+              <div className="agent-yolo-inline">
+                <span>YOLO</span>
+                <button
+                  className="switch-control agent-yolo-switch"
+                  type="button"
+                  role="switch"
+                  aria-label="YOLO mode"
+                  aria-checked={selectedRuntime?.supportsYolo ? yolo : false}
+                  data-enabled={selectedRuntime?.supportsYolo ? yolo : false}
+                  disabled={busy || !selectedRuntime?.supportsYolo}
+                  onClick={() => setYolo((current) => !current)}
+                >
+                  <span className="switch-thumb" aria-hidden="true" />
+                </button>
+                <span className="agent-yolo-help-wrap">
+                  <button
+                    className="agent-yolo-help"
+                    type="button"
+                    aria-label="About YOLO mode"
+                    data-tooltip={
+                      selectedRuntime?.supportsYolo
+                        ? "Skips approval prompts and removes this CLI's sandbox for the session."
+                        : "The selected runtime does not support YOLO mode."
+                    }
+                  >
+                    ?
+                  </button>
+                  <span className="agent-yolo-tooltip" role="tooltip">
+                    {selectedRuntime?.supportsYolo
+                      ? "Skips approval prompts and removes this CLI's sandbox for this session."
+                      : "The selected runtime does not support YOLO mode."}
+                  </span>
+                </span>
+              </div>
             </div>
           </section>
 
@@ -346,22 +441,6 @@ export function NewAgentDialog({
 
             {selectedRuntime ? (
               <React.Fragment>
-                <div className="agent-runtime-summary">
-                  <span className="agent-glyph" aria-hidden="true">
-                    {agentGlyph(selectedRuntime.kind)}
-                  </span>
-                  <p>
-                    <strong>{selectedRuntime.label}</strong>
-                    <span>{selectedRuntime.description}</span>
-                  </p>
-                </div>
-
-                <p className="agent-model-note">
-                  {selectedRuntime.kind === "ollama"
-                    ? "Models come from this machine's Ollama library."
-                    : "Use the provider default or pin a model for this session."}
-                </p>
-
                 {!selectedRuntime.available ? (
                   <div className="agent-install-hint">
                     <div>
@@ -377,45 +456,6 @@ export function NewAgentDialog({
                     </button>
                   </div>
                 ) : null}
-
-                {selectedRuntime.supportsYolo ? (
-                  <React.Fragment>
-                    <section
-                      className="agent-yolo-row"
-                      aria-label="Agent permissions"
-                    >
-                      <div>
-                        <strong>YOLO mode</strong>
-                        <p>
-                          Skip approval prompts and allow unrestricted agent
-                          actions.
-                        </p>
-                      </div>
-                      <button
-                        className="switch-control agent-yolo-switch"
-                        type="button"
-                        role="switch"
-                        aria-label="YOLO mode"
-                        aria-checked={yolo}
-                        data-enabled={yolo}
-                        disabled={busy}
-                        onClick={() => setYolo((current) => !current)}
-                      >
-                        <span className="switch-thumb" aria-hidden="true" />
-                      </button>
-                    </section>
-                    {yolo ? (
-                      <p className="agent-yolo-warning">
-                        YOLO removes the selected CLI's sandbox and confirmation
-                        gates.
-                      </p>
-                    ) : null}
-                  </React.Fragment>
-                ) : (
-                  <p className="agent-permission-note">
-                    This runtime does not expose agent approval controls.
-                  </p>
-                )}
               </React.Fragment>
             ) : (
               <p className="agent-runtime-empty">No agent runtime detected.</p>

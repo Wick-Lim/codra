@@ -95,9 +95,9 @@ function createPaneApi(
   const api: CodraDesktopApi = {
     agents: {
       setup: vi.fn(),
-      targets: vi.fn().mockResolvedValue([
-        { target: { kind: "local" }, state: "connected" },
-      ]),
+      targets: vi
+        .fn()
+        .mockResolvedValue([{ target: { kind: "local" }, state: "connected" }]),
       connectTarget: vi.fn(),
       listForTarget: vi.fn().mockResolvedValue([]),
       workspaceRoots: vi.fn().mockResolvedValue([]),
@@ -911,8 +911,10 @@ describe("App terminal workspace", () => {
       await screen.findByRole("dialog", { name: "New agent" }),
     ).toBeVisible();
     expect(
-      screen.getByRole("textbox", { name: "Working directory" }),
-    ).toHaveValue("/Users/codra");
+      screen.getByRole("button", {
+        name: "Working directory on This Mac: /Users/codra",
+      }),
+    ).toHaveTextContent("codra");
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Agent" }),
       "gemini",

@@ -216,7 +216,9 @@ test("chooses an agent workdir natively and keeps launch actions visible", async
 
     const dialog = page.getByRole("dialog", { name: "New agent" });
     const prompt = page.getByRole("textbox", { name: "First prompt" });
-    const workdir = page.getByRole("textbox", { name: "Working directory" });
+    const workdir = page.getByRole("button", {
+      name: /Working directory on This Mac/u,
+    });
     const agent = page.getByRole("combobox", { name: "Agent" });
     await expect(dialog).toBeVisible();
     await expect(agent).toBeVisible();
@@ -229,8 +231,7 @@ test("chooses an agent workdir natively and keeps launch actions visible", async
     );
     expect((await agent.boundingBox())!.height).toBeLessThanOrEqual(40);
     await expect(workdir).toBeVisible();
-    await expect(workdir).not.toHaveValue("");
-    await expect(workdir).toHaveAttribute("readonly", "");
+    await expect(workdir).toHaveAttribute("title", /This Mac · \/.+/u);
     await expect(prompt).toBeFocused();
     await electronApp.evaluate(({ BrowserWindow, dialog }) => {
       Object.defineProperty(dialog, "showOpenDialog", {
@@ -258,10 +259,12 @@ test("chooses an agent workdir natively and keeps launch actions visible", async
         },
       });
     });
-    await page
-      .getByRole("button", { name: "Choose working directory" })
-      .click();
-    await expect(workdir).toHaveValue("/tmp/codra-selected-workspace");
+    await workdir.click();
+    await expect(workdir).toHaveText("codra-selected-workspace");
+    await expect(workdir).toHaveAttribute(
+      "title",
+      "This Mac · /tmp/codra-selected-workspace",
+    );
     expect(
       await dialog.evaluate((element) => {
         const body = element.querySelector<HTMLElement>(".modal-body");
