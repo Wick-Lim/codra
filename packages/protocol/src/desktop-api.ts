@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type {
+  AgentRuntime,
   CreateTerminalRequest,
   ReplayTerminalRequest,
   ResizeTerminalRequest,
@@ -35,15 +36,35 @@ export const RemoteAccountStateSchema = z.enum([
 ]);
 export type RemoteAccountState = z.infer<typeof RemoteAccountStateSchema>;
 
-export const RemoteAccountStatusSchema = z
+export const RemoteAccountProfileSchema = z
   .object({
-    state: RemoteAccountStateSchema,
-    message: z.string().min(1).max(160).optional(),
+    displayName: z.string().trim().min(1).max(120).nullable(),
+    email: z.string().email().max(254).nullable(),
+    photoUrl: z.string().url().max(2_048).nullable(),
   })
   .strict();
+export type RemoteAccountProfile = z.infer<typeof RemoteAccountProfileSchema>;
+
+export const RemoteAccountStatusSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("signed_out") }).strict(),
+  z.object({ state: z.literal("signing_in") }).strict(),
+  z
+    .object({
+      state: z.literal("signed_in"),
+      profile: RemoteAccountProfileSchema,
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("error"),
+      message: z.string().min(1).max(160).optional(),
+    })
+    .strict(),
+]);
 export type RemoteAccountStatus = z.infer<typeof RemoteAccountStatusSchema>;
 
 export const IPC_CHANNELS = {
+  agentList: "codra:agent:list",
   terminalList: "codra:terminal:list",
   terminalCreate: "codra:terminal:create",
   terminalWrite: "codra:terminal:write",
@@ -55,6 +76,7 @@ export const IPC_CHANNELS = {
   remoteGetState: "codra:remote:get-state",
   remoteGetAuthState: "codra:remote:get-auth-state",
   remoteLogin: "codra:remote:login",
+  remoteLogout: "codra:remote:logout",
   remoteActivate: "codra:remote:activate",
   remoteDeactivate: "codra:remote:deactivate",
   remoteState: "codra:remote:state",
@@ -62,6 +84,9 @@ export const IPC_CHANNELS = {
 } as const;
 
 export interface CodraDesktopApi {
+  agents: {
+    list(): Promise<AgentRuntime[]>;
+  };
   terminal: {
     list(): Promise<TerminalDescriptor[]>;
     create(request: CreateTerminalRequest): Promise<TerminalDescriptor>;
@@ -76,6 +101,7 @@ export interface CodraDesktopApi {
     getState(): Promise<RemoteHostStatus>;
     getAuthState(): Promise<RemoteAccountStatus>;
     login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus>;
+    logout(): Promise<RemoteAccountStatus>;
     activate(): Promise<RemoteHostStatus>;
     deactivate(): Promise<RemoteHostStatus>;
     onStateChanged(listener: (status: RemoteHostStatus) => void): () => void;

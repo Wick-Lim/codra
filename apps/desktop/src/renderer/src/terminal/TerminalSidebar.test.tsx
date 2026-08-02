@@ -2,7 +2,6 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   CodraDesktopApi,
-  RemoteHostStatus,
   TerminalDescriptor,
   TerminalOutputChunk,
 } from "@codra/protocol";
@@ -92,6 +91,57 @@ function createPaneApi(
   const outputListeners = new Set<(chunk: TerminalOutputChunk) => void>();
   const outputUnsubscribes: ReturnType<typeof vi.fn>[] = [];
   const api: CodraDesktopApi = {
+    agents: {
+      list: vi.fn().mockResolvedValue([
+        {
+          kind: "codex",
+          label: "Codex CLI",
+          description: "OpenAI's coding agent for repository work.",
+          available: true,
+          supportsYolo: true,
+          modelRequired: false,
+          efforts: [{ id: "high", label: "High" }],
+          models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
+          installHint: "Install Codex CLI to use this runtime.",
+        },
+        {
+          kind: "claude",
+          label: "Claude Code",
+          description: "Anthropic's agentic coding CLI.",
+          available: true,
+          supportsYolo: true,
+          modelRequired: false,
+          efforts: [{ id: "high", label: "High" }],
+          models: [{ id: "sonnet", label: "Sonnet" }],
+          installHint: "Install Claude Code to use this runtime.",
+        },
+        {
+          kind: "gemini",
+          label: "Gemini CLI",
+          description: "Google's open-source terminal coding agent.",
+          available: true,
+          supportsYolo: true,
+          modelRequired: false,
+          efforts: [],
+          models: [
+            { id: "auto", label: "Auto" },
+            { id: "pro", label: "Pro" },
+          ],
+          installHint: "Install @google/gemini-cli to use this runtime.",
+        },
+        {
+          kind: "ollama",
+          label: "Ollama",
+          description: "Run a local model through Ollama.",
+          available: true,
+          supportsYolo: false,
+          modelRequired: true,
+          efforts: [{ id: "high", label: "High" }],
+          models: [{ id: "gemma4:e4b", label: "gemma4:e4b" }],
+          installHint: "Install Ollama and pull a model to use this runtime.",
+        },
+      ]),
+    },
     terminal: {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
@@ -112,7 +162,15 @@ function createPaneApi(
     remote: {
       getState: vi.fn().mockResolvedValue({ state: "idle" }),
       getAuthState: vi.fn().mockResolvedValue({ state: "signed_out" }),
-      login: vi.fn().mockResolvedValue({ state: "signed_in" }),
+      login: vi.fn().mockResolvedValue({
+        state: "signed_in",
+        profile: {
+          displayName: "Jun Hyeog Im",
+          email: "jun@example.com",
+          photoUrl: null,
+        },
+      }),
+      logout: vi.fn().mockResolvedValue({ state: "signed_out" }),
       activate: vi.fn().mockResolvedValue({ state: "online" }),
       deactivate: vi.fn().mockResolvedValue({ state: "idle" }),
       onStateChanged: vi.fn(() => vi.fn()),
@@ -180,44 +238,24 @@ const exitedTerminal: TerminalDescriptor = {
 };
 
 describe("TerminalSidebar", () => {
-  it("opens a provider dialog from the bottom-left account avatar", async () => {
-    const onRemoteLogin = vi.fn();
-    const { rerender } = render(
+  it("keeps remote controls out of the CLI session rail", async () => {
+    const onSignIn = vi.fn();
+    render(
       <TerminalSidebar
         terminals={[]}
         activeId={null}
-        remoteStatus={{ state: "idle" }}
-        onRemoteLogin={onRemoteLogin}
+        accountStatus={{ state: "signed_out" }}
+        onSignIn={onSignIn}
+        onOpenSettings={vi.fn()}
+        onLogout={vi.fn()}
       />,
     );
 
-    expect(screen.queryByRole("dialog")).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "로그인 계정" }));
-    expect(screen.getByRole("dialog", { name: "로그인 방법 선택" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: /Google/ }));
-    expect(onRemoteLogin).toHaveBeenCalledWith("google");
-
-    rerender(
-      <TerminalSidebar
-        terminals={[]}
-        activeId={null}
-        accountStatus={{ state: "signing_in" }}
-        onRemoteLogin={onRemoteLogin}
-      />,
+    expect(screen.queryByRole("region", { name: "Remote access" })).toBeNull();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Sign in to CODRA" }),
     );
-    expect(screen.getByText("브라우저에서 Google 로그인 중…")).toBeVisible();
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    const online: RemoteHostStatus = { state: "online" };
-    rerender(
-      <TerminalSidebar
-        terminals={[]}
-        activeId={null}
-        remoteStatus={online}
-        onRemoteLogin={onRemoteLogin}
-      />,
-    );
-    expect(screen.getByText("원격 연결됨")).toBeVisible();
+    expect(onSignIn).toHaveBeenCalledOnce();
   });
 
   it("shows terminal identity, cwd basename, and retained exit state", () => {
@@ -229,6 +267,7 @@ describe("TerminalSidebar", () => {
     );
 
     expect(screen.getByRole("navigation", { name: "Terminals" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New agent" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New terminal" })).toBeVisible();
     expect(screen.getAllByText("api")[0]).toBeVisible();
     expect(screen.getAllByText("tests")[0]).toBeVisible();
@@ -238,7 +277,8 @@ describe("TerminalSidebar", () => {
   });
 
   it("exposes selection, creation, and close actions to keyboard users", async () => {
-    const onCreate = vi.fn();
+    const onCreateAgent = vi.fn();
+    const onCreateTerminal = vi.fn();
     const onSelect = vi.fn();
     const onClose = vi.fn();
     const user = userEvent.setup();
@@ -246,7 +286,8 @@ describe("TerminalSidebar", () => {
       <TerminalSidebar
         terminals={[runningTerminal]}
         activeId={runningTerminal.id}
-        onCreate={onCreate}
+        onCreateAgent={onCreateAgent}
+        onCreateTerminal={onCreateTerminal}
         onSelect={onSelect}
         onClose={onClose}
       />,
@@ -258,6 +299,9 @@ describe("TerminalSidebar", () => {
     expect(terminalButton).toHaveAttribute("aria-current", "true");
 
     await user.tab();
+    expect(screen.getByRole("button", { name: "New agent" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.tab();
     expect(screen.getByRole("button", { name: "New terminal" })).toHaveFocus();
     await user.keyboard("{Enter}");
     await user.tab();
@@ -267,7 +311,8 @@ describe("TerminalSidebar", () => {
     expect(screen.getByRole("button", { name: "Close api" })).toHaveFocus();
     await user.keyboard(" ");
 
-    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onCreateAgent).toHaveBeenCalledOnce();
+    expect(onCreateTerminal).toHaveBeenCalledOnce();
     expect(onSelect).toHaveBeenCalledWith(runningTerminal.id);
     expect(onClose).toHaveBeenCalledWith(runningTerminal.id);
   });
@@ -788,7 +833,83 @@ describe("App terminal workspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent("100 × 30");
   });
 
-  it("opens provider dialog and keeps login separate from activation", async () => {
+  it("removes a terminal from the sidebar after its close request succeeds", async () => {
+    const api = createPaneApi();
+    vi.mocked(api.terminal.list).mockResolvedValue([runningTerminal]);
+    Object.defineProperty(window, "codra", {
+      configurable: true,
+      value: api,
+    });
+
+    render(React.createElement(App));
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Close api" }),
+    );
+
+    await waitFor(() =>
+      expect(api.terminal.close).toHaveBeenCalledWith(runningTerminal.id),
+    );
+    expect(screen.queryByRole("button", { name: "Close api" })).toBeNull();
+    expect(
+      screen.getByText("No terminals. Create one to start."),
+    ).toBeVisible();
+  });
+
+  it("launches a configured CLI agent and keeps plain terminal creation separate", async () => {
+    const api = createPaneApi();
+    vi.mocked(api.terminal.create)
+      .mockResolvedValueOnce({ ...runningTerminal, title: "Gemini · pro" })
+      .mockResolvedValueOnce(runningTerminal);
+    Object.defineProperty(window, "codra", {
+      configurable: true,
+      value: api,
+    });
+
+    render(React.createElement(App));
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "New agent" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "New agent" }),
+    ).toBeVisible();
+    await userEvent.click(screen.getByRole("radio", { name: /Gemini CLI/ }));
+    await userEvent.selectOptions(
+      screen.getByRole("combobox", { name: "Model" }),
+      "pro",
+    );
+    await userEvent.click(screen.getByRole("switch", { name: "YOLO mode" }));
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "First prompt" }),
+      "Fix the desktop login flow",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Start agent" }));
+
+    await waitFor(() =>
+      expect(api.terminal.create).toHaveBeenCalledWith({
+        cols: 100,
+        rows: 30,
+        agent: {
+          kind: "gemini",
+          yolo: true,
+          model: "pro",
+          prompt: "Fix the desktop login flow",
+        },
+      }),
+    );
+    expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "New terminal" }));
+    await waitFor(() =>
+      expect(api.terminal.create).toHaveBeenLastCalledWith({
+        cols: 100,
+        rows: 30,
+      }),
+    );
+  });
+
+  it("opens sign-in and settings as supporting modal surfaces", async () => {
     const api = createPaneApi();
     Object.defineProperty(window, "codra", {
       configurable: true,
@@ -797,10 +918,25 @@ describe("App terminal workspace", () => {
 
     render(React.createElement(App));
 
-    await userEvent.click(await screen.findByRole("button", { name: "로그인 계정" }));
-    expect(screen.getByRole("dialog", { name: "로그인 방법 선택" })).toBeVisible();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Sign in to CODRA" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Sign in to CODRA" }),
+    ).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: /Google/ }));
     expect(api.remote.login).toHaveBeenCalledWith("google");
     expect(api.remote.activate).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remote offline — open settings" }),
+    );
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeVisible();
+    const remoteSwitch = screen.getByRole("switch", {
+      name: "Remote access",
+    });
+    expect(remoteSwitch).not.toBeDisabled();
+    await userEvent.click(remoteSwitch);
+    expect(api.remote.activate).toHaveBeenCalledOnce();
   });
 });

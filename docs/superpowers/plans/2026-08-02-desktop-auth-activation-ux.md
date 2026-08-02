@@ -21,6 +21,7 @@
 ### Task 1: Extend protocol and IPC contracts for independent account/host state
 
 **Files:**
+
 - Modify: `packages/protocol/src/desktop-api.ts`
 - Modify: `packages/protocol/test/desktop-api.test.ts`
 - Modify: `apps/desktop/src/main/ipc/remote-ipc.ts`
@@ -29,6 +30,7 @@
 - Modify: `apps/desktop/src/preload/desktop-api.test.ts`
 
 **Interfaces:**
+
 - Produce `RemoteAccountStatusSchema` with states `signed_out`, `signing_in`, `signed_in`, and `error`.
 - Produce `RemoteAuthProviderSchema` with `google` and `email_password` values.
 - Keep `RemoteHostStatusSchema`, adding host state `activating` while retaining `idle`, `online`, and `error`.
@@ -43,6 +45,7 @@
 ### Task 2: Add direct desktop account-auth bootstrap and existing-session activation
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/remote/desktop-login.ts`
 - Modify: `apps/desktop/src/main/remote/desktop-login.test.ts`
 - Modify: `apps/desktop/src/main/remote/account-bootstrap-google.ts`
@@ -50,6 +53,7 @@
 - Modify: `apps/desktop/src/main/remote/remote-bindings.d.ts`
 
 **Interfaces:**
+
 - Produce `bootstrapProductionDesktopAuth(runtime, overrides?)`: direct Google loopback authentication with no `desktopLoginStart` transaction.
 - Extend `DesktopLoginBootstrapOptions` with `useExistingAuth?: boolean`; activation skips the Google browser flow only when this flag is true and uses the already signed-in Firebase Auth session.
 - Produce `bootstrapRemoteAuth(runtime, provider)` through the compile-time Google/test-only bindings.
@@ -64,6 +68,7 @@
 ### Task 3: Refactor `RemoteHostController` lifecycle and IPC wiring
 
 **Files:**
+
 - Modify: `apps/desktop/src/main/remote/host-controller.ts`
 - Modify: `apps/desktop/src/main/remote/remote-state.ts`
 - Modify: `apps/desktop/src/main/ipc/remote-ipc.ts`
@@ -73,6 +78,7 @@
 - Add/Modify: `apps/desktop/src/main/remote/host-controller.test.ts`
 
 **Interfaces:**
+
 - `login(provider)` authenticates the account only and publishes account state.
 - `activate()` requires a signed-in account, registers/resumes the host, starts heartbeat and session listeners, and publishes host state.
 - `deactivate()` stops host heartbeat/listeners while preserving account authentication.
@@ -87,12 +93,14 @@
 ### Task 4: Implement provider dialog and explicit remote activation UI
 
 **Files:**
+
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Modify: `apps/desktop/src/renderer/src/terminal/TerminalSidebar.tsx`
 - Modify: `apps/desktop/src/renderer/src/terminal/TerminalSidebar.test.tsx`
 - Modify: `apps/desktop/src/renderer/src/styles.css`
 
 **Interfaces:**
+
 - Account avatar opens a modal dialog with Google and email/password test-provider entries; unavailable providers are visibly disabled rather than silently executing another flow.
 - Account status is shown independently from remote host status.
 - A signed-in account with an idle host shows an explicit `원격 활성화` action; an online host shows `원격 비활성화`.
@@ -105,6 +113,7 @@
 ### Task 5: Verify and deploy Firestore query infrastructure
 
 **Files:**
+
 - Verify: `firestore.indexes.json`
 - Verify: `firestore.rules`
 - Modify if needed: `scripts/verify-firebase-indexes.mjs`
@@ -114,4 +123,3 @@
 - [ ] **Step 3: Deploy `firestore:rules` and `firestore:indexes` to project `codra-1b3bb`; verify successful release output.**
 - [ ] **Step 4: Run `git diff --check`, `pnpm typecheck`, `pnpm test`, and `pnpm --filter @codra/desktop build`.**
 - [ ] **Step 5: Commit/push any source changes as `fix: provision remote session listener indexes` and record deployment verification in the handoff.**
-

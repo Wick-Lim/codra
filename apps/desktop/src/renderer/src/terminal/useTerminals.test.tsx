@@ -28,6 +28,9 @@ function createDesktopApiFake() {
   const stopChanged = vi.fn();
 
   const api: CodraDesktopApi = {
+    agents: {
+      list: vi.fn().mockResolvedValue([]),
+    },
     terminal: {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
@@ -44,7 +47,11 @@ function createDesktopApiFake() {
     remote: {
       getState: vi.fn().mockResolvedValue({ state: "idle" }),
       getAuthState: vi.fn().mockResolvedValue({ state: "signed_out" }),
-      login: vi.fn().mockResolvedValue({ state: "signed_in" }),
+      login: vi.fn().mockResolvedValue({
+        state: "signed_in",
+        profile: { displayName: null, email: null, photoUrl: null },
+      }),
+      logout: vi.fn().mockResolvedValue({ state: "signed_out" }),
       activate: vi.fn().mockResolvedValue({ state: "online" }),
       deactivate: vi.fn().mockResolvedValue({ state: "idle" }),
       onStateChanged: vi.fn(() => vi.fn()),
@@ -106,6 +113,7 @@ describe("useTerminals", () => {
     await waitFor(() => {
       expect(result.current.activeTerminalId).toBe(secondTerminal.id);
     });
+    expect(result.current.terminals).toEqual([secondTerminal]);
     expect(fake.api.terminal.list).toHaveBeenCalledOnce();
   });
 
@@ -126,7 +134,35 @@ describe("useTerminals", () => {
     expect(result.current.activeTerminalId).toBe(secondTerminal.id);
   });
 
-  it("selects and closes terminals without discarding an exited descriptor", async () => {
+  it("creates and selects an interactive agent terminal", async () => {
+    const fake = createDesktopApiFake();
+    vi.mocked(fake.api.terminal.create).mockResolvedValue({
+      ...secondTerminal,
+      title: "Codex",
+    });
+    const { result } = renderHook(() => useTerminals(fake.api));
+
+    await act(async () => {
+      await result.current.createAgent({
+        kind: "codex",
+        yolo: true,
+        prompt: "Fix the failing tests",
+      });
+    });
+
+    expect(fake.api.terminal.create).toHaveBeenCalledWith({
+      cols: 100,
+      rows: 30,
+      agent: {
+        kind: "codex",
+        yolo: true,
+        prompt: "Fix the failing tests",
+      },
+    });
+    expect(result.current.activeTerminal?.title).toBe("Codex");
+  });
+
+  it("removes an explicitly closed terminal and ignores its late exit event", async () => {
     const fake = createDesktopApiFake();
     vi.mocked(fake.api.terminal.list).mockResolvedValue([
       firstTerminal,
@@ -146,12 +182,10 @@ describe("useTerminals", () => {
     });
 
     expect(fake.api.terminal.close).toHaveBeenCalledWith(secondTerminal.id);
-    expect(result.current.terminals).toContainEqual({
-      ...secondTerminal,
-      state: "exited",
-      exitCode: 0,
+    await waitFor(() => {
+      expect(result.current.terminals).toEqual([firstTerminal]);
+      expect(result.current.activeTerminalId).toBe(firstTerminal.id);
     });
-    expect(result.current.activeTerminalId).toBe(secondTerminal.id);
   });
 
   it("replaces changed descriptors", async () => {

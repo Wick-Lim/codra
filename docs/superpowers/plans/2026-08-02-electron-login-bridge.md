@@ -25,11 +25,13 @@
 ### Task 1: Freeze desktop login protocol contracts
 
 **Files:**
+
 - Modify: `packages/protocol/src/remote.ts`
 - Modify: `packages/protocol/src/index.ts`
 - Create: `packages/protocol/test/desktop-login.test.ts`
 
 **Interfaces:**
+
 - Produce `DesktopLoginActionSchema`, `DesktopLoginStartRequestSchema`, `DesktopLoginAuthorizeRequestSchema`, `DesktopLoginRedeemRequestSchema`, `DesktopLoginCancelRequestSchema`.
 - Produce response schemas for inspect, allow, redeem, and cancel.
 - Produce `buildDesktopLoginStartSigningPayload` and `buildDesktopLoginRedeemSigningPayload`.
@@ -105,11 +107,13 @@ git commit -m "feat: freeze desktop login contracts"
 ### Task 2: Implement Firebase desktop-login transaction Functions
 
 **Files:**
+
 - Create: `functions/src/desktop-login.ts`
 - Modify: `functions/src/index.ts`
 - Create: `functions/test/desktop-login.test.ts`
 
 **Interfaces:**
+
 - Export `desktopLoginStart`, `authorizeDesktopLogin`, `desktopLoginRedeem`, and `desktopLoginCancel`.
 - `desktopLoginStart` and `desktopLoginRedeem` are regional `onRequest` handlers with manual POST/JSON/no-store/no-Origin validation.
 - `authorizeDesktopLogin` is a regional callable accepting only Google Auth.
@@ -119,6 +123,7 @@ git commit -m "feat: freeze desktop login contracts"
 - [ ] **Step 1: Add failing transaction tests**
 
 Cover:
+
 - start rejects non-POST, present Origin, wrong content type, malformed input, bad start signature, and duplicate attempt IDs;
 - start stores only bounded device/login metadata, state hash, callback port/path, PKCE challenge, and the Electron-generated nonce; the returned `serverNonce` is the server-confirmed echo of that transaction-bound nonce;
 - inspect rejects absent/non-Google Auth, wrong state, missing transaction, expired/cancelled/consumed transaction;
@@ -131,6 +136,7 @@ Cover:
 - [ ] **Step 2: Implement bounded HTTP parsing**
 
 Require:
+
 - `POST`;
 - `Content-Type: application/json`;
 - no `Origin` header;
@@ -157,6 +163,7 @@ Assert all four exports use `FUNCTION_REGION`, raw handlers omit callable App Ch
 - [ ] **Step 6: Run focused Functions verification**
 
 Run:
+
 ```sh
 pnpm --filter @codra/functions test
 pnpm --filter @codra/functions typecheck
@@ -176,6 +183,7 @@ git commit -m "feat: add Electron desktop login Functions"
 ### Task 3: Implement Electron main system-browser bootstrap
 
 **Files:**
+
 - Create: `apps/desktop/src/main/remote/desktop-login.ts`
 - Modify: `apps/desktop/src/main/remote/account-bootstrap-google.ts`
 - Modify: `apps/desktop/src/main/remote/account-bootstrap-test-only.ts`
@@ -184,6 +192,7 @@ git commit -m "feat: add Electron desktop login Functions"
 - Create: `apps/desktop/src/main/remote/desktop-login.test.ts`
 
 **Interfaces:**
+
 - `bootstrapRemoteAccount(runtime, options): Promise<DesktopLoginBootstrapResult | undefined>`.
 - `DesktopLoginBootstrapResult = { token: string; serverTimeMillis: number; device: RemoteDevice }`.
 - `options = { identity: HostIdentity; action: "register" | "resume" | "reenable" }`.
@@ -193,6 +202,7 @@ git commit -m "feat: add Electron desktop login Functions"
 - [ ] **Step 1: Add RED tests for pure URL/PKCE/callback behavior**
 
 Cover:
+
 - exact 43-character verifier/challenge;
 - canonical bridge URL only;
 - exact Host/path/method/query acceptance;
@@ -219,6 +229,7 @@ Production bootstrap returns the redeem response. Move host identity loading bef
 - [ ] **Step 5: Run desktop focused tests**
 
 Run:
+
 ```sh
 pnpm --filter @codra/desktop test -- desktop-login.test.ts
 pnpm --filter @codra/desktop typecheck
@@ -236,6 +247,7 @@ git commit -m "feat: add Electron system-browser login bootstrap"
 ### Task 4: Implement hosted Firebase Google bridge UI
 
 **Files:**
+
 - Create: `apps/web/src/remote/DesktopAuthBridge.tsx`
 - Modify: `apps/web/src/App.tsx`
 - Create: `apps/web/src/remote/firebase-bridge.ts`
@@ -243,6 +255,7 @@ git commit -m "feat: add Electron system-browser login bootstrap"
 - Create: `apps/web/src/remote/DesktopAuthBridge.test.tsx`
 
 **Interfaces:**
+
 - Route `/desktop-auth` renders `DesktopAuthBridge`; all other routes retain current login/workspace behavior.
 - Bridge uses the existing production Firebase config and a dedicated named Auth instance.
 - It performs Google `signInWithRedirect`, explicit `getRedirectResult`, callable inspect, explicit Allow, then exactly one top-level callback navigation.
@@ -267,6 +280,7 @@ Place the route check before normal App auth state. Keep `/login` and `/` behavi
 - [ ] **Step 5: Run web verification**
 
 Run:
+
 ```sh
 pnpm --filter @codra/web test
 pnpm --filter @codra/web typecheck
@@ -286,6 +300,7 @@ git commit -m "feat: add hosted Electron login bridge"
 ### Task 5: Integrate, emulator-test, deploy, and verify
 
 **Files:**
+
 - Modify: `scripts/verify-remote-build-config.mjs`
 - Modify: `docs/runbooks/remote-access.md` (create if absent)
 - Modify: `README.md` only for user-facing login instructions
@@ -297,6 +312,7 @@ Require the four Function exports, `/desktop-auth` and `/login` rewrites, produc
 - [ ] **Step 2: Run the full verification suite**
 
 Run:
+
 ```sh
 pnpm typecheck
 pnpm test
@@ -311,6 +327,7 @@ git diff --check
 - [ ] **Step 3: Run emulator convergence checks**
 
 Start the existing `demo-codra` emulators and verify:
+
 - a remote-test host starts local terminal immediately;
 - malformed login callbacks do not terminate the process;
 - valid remote-test account bootstrap still registers a host;
@@ -327,4 +344,3 @@ git add scripts docs README.md
 git commit -m "docs: document Electron login bridge"
 git push origin main
 ```
-

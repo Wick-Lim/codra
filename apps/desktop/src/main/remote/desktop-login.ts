@@ -104,7 +104,11 @@ export interface DesktopLoginCallbackListener {
 
 export interface DesktopLoginDependencies {
   fetch(input: string, init: RequestInit): Promise<Response>;
-  openExternal(url: string): Promise<void>;
+  openExternal(
+    url: string,
+    callbackUrl?: string,
+    signal?: AbortSignal,
+  ): Promise<void>;
   randomBytes(size: number): Uint8Array;
   randomUUID(): string;
   timeoutMs: number;
@@ -224,7 +228,7 @@ export async function createDesktopLoginCallbackListener(options: {
   let port = 0;
   let settled = false;
   let closePromise: Promise<void> | undefined;
-  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutRef: { current?: ReturnType<typeof setTimeout> } = {};
   let resolveCallback!: (value: DesktopLoginCallback) => void;
   let rejectCallback!: (reason: Error) => void;
   const callback = new Promise<DesktopLoginCallback>((resolve, reject) => {
@@ -235,14 +239,14 @@ export async function createDesktopLoginCallbackListener(options: {
   // handler attached while preserving the original promise for the caller.
   void callback.catch(() => undefined);
   const close = async (): Promise<void> => {
-    if (timeout) clearTimeout(timeout);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     if (!closePromise) closePromise = closeServer(server, sockets);
     await closePromise;
   };
   const rejectAndClose = (error: Error): void => {
     if (settled) return;
     settled = true;
-    if (timeout) clearTimeout(timeout);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     void close();
     rejectCallback(error);
   };
@@ -262,7 +266,7 @@ export async function createDesktopLoginCallbackListener(options: {
       return;
     }
     settled = true;
-    if (timeout) clearTimeout(timeout);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
     response.writeHead(200, {
       "Cache-Control": "no-store",
       "Content-Type": "text/html; charset=utf-8",
@@ -300,7 +304,7 @@ export async function createDesktopLoginCallbackListener(options: {
     server.once("listening", onListening);
     server.listen(options.port ?? DESKTOP_LOGIN_CALLBACK_PORT, "127.0.0.1");
   });
-  timeout = setTimeout(() => {
+  timeoutRef.current = setTimeout(() => {
     rejectAndClose(new Error("DESKTOP_LOGIN_TIMEOUT"));
   }, options.timeoutMs ?? LOGIN_TIMEOUT_MS);
   return { port, waitForCallback: () => callback, close };
@@ -464,7 +468,9 @@ async function postDesktopLoginJson(
   return payload;
 }
 
-function desktopLoginResponseErrorMessage(payload: unknown): string | undefined {
+function desktopLoginResponseErrorMessage(
+  payload: unknown,
+): string | undefined {
   if (!payload || typeof payload !== "object") return undefined;
   const error = (payload as { error?: unknown }).error;
   if (typeof error === "string") return error;
@@ -518,12 +524,13 @@ async function cancelDesktopLogin(
 export async function bootstrapProductionDesktopAuth(
   runtime: FirebaseRuntime,
   overrides: Partial<DesktopLoginDependencies> = {},
+  externalSignal?: AbortSignal,
 ): Promise<void> {
   if (runtime.deployment.mode !== "production")
     throw new Error("DESKTOP_GOOGLE_LOGIN_REQUIRES_PRODUCTION");
   const dependencies = { ...desktopLoginDefaults, ...overrides };
   const attemptId = dependencies.randomUUID();
-  let state = createPkceVerifier(dependencies.randomBytes(32));
+  const state = createPkceVerifier(dependencies.randomBytes(32));
   let listener: DesktopLoginCallbackListener | undefined;
   const abort = new AbortController();
   let rejectDeadline!: (error: Error) => void;
@@ -535,6 +542,12 @@ export async function bootstrapProductionDesktopAuth(
     abort.abort();
     rejectDeadline(new Error("DESKTOP_LOGIN_TIMEOUT"));
   }, dependencies.timeoutMs);
+  const cancelLogin = (): void => {
+    abort.abort();
+    rejectDeadline(new Error("DESKTOP_LOGIN_CANCELLED"));
+  };
+  if (externalSignal?.aborted) cancelLogin();
+  else externalSignal?.addEventListener("abort", cancelLogin, { once: true });
   const bounded = <T>(work: Promise<T>): Promise<T> =>
     Promise.race([work, deadline]);
   try {
@@ -555,7 +568,9 @@ export async function bootstrapProductionDesktopAuth(
         abort.signal,
       ),
     );
-    await bounded(dependencies.openExternal(googleAuthUri));
+    await bounded(
+      dependencies.openExternal(googleAuthUri, callbackUrl, abort.signal),
+    );
     const callback = await bounded(listener.waitForCallback());
     await bounded(
       completeDesktopLoginGoogleAuth(
@@ -571,8 +586,8 @@ export async function bootstrapProductionDesktopAuth(
     );
   } finally {
     clearTimeout(deadlineTimer);
+    externalSignal?.removeEventListener("abort", cancelLogin);
     await listener?.close();
-    state = "";
   }
 }
 
@@ -586,9 +601,9 @@ export async function bootstrapProductionDesktopLogin(
   if (useExistingAuth && !runtime.auth.currentUser)
     throw new Error("REMOTE_AUTH_REQUIRED");
   const attemptId = dependencies.randomUUID();
-  let state = createPkceVerifier(dependencies.randomBytes(32));
-  let verifier = createPkceVerifier(dependencies.randomBytes(32));
-  let nonce = createPkceVerifier(dependencies.randomBytes(32));
+  const state = createPkceVerifier(dependencies.randomBytes(32));
+  const verifier = createPkceVerifier(dependencies.randomBytes(32));
+  const nonce = createPkceVerifier(dependencies.randomBytes(32));
   let listener: DesktopLoginCallbackListener | undefined;
   let callbackResult:
     Promise<{ value: DesktopLoginCallback } | { error: unknown }> | undefined;
@@ -672,7 +687,13 @@ export async function bootstrapProductionDesktopLogin(
           abort.signal,
         ),
       );
-      await bounded(dependencies.openExternal(googleAuthUri));
+      await bounded(
+        dependencies.openExternal(
+          googleAuthUri,
+          callbackUrl.toString(),
+          abort.signal,
+        ),
+      );
       const callbackOutcome = await bounded(callbackResult!);
       if ("error" in callbackOutcome) throw callbackOutcome.error;
       callback = callbackOutcome.value;
@@ -738,10 +759,5 @@ export async function bootstrapProductionDesktopLogin(
     await listener?.close();
     if (cancelEligible && !completed)
       await cancelDesktopLogin(runtime, dependencies, attemptId, state);
-    // Nothing is persisted, and clearing these short-lived values removes
-    // their references once the bootstrap promise settles.
-    state = "";
-    verifier = "";
-    nonce = "";
   }
 }

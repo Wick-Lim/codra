@@ -1,4 +1,5 @@
 import {
+  AgentRuntimeSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   RemoteAccountStatusSchema,
@@ -31,6 +32,13 @@ function assertUndefinedResponse(
 
 export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
   return {
+    agents: {
+      async list() {
+        return AgentRuntimeSchema.array().parse(
+          await ipc.invoke(IPC_CHANNELS.agentList),
+        );
+      },
+    },
     terminal: {
       async list() {
         return TerminalDescriptorSchema.array().parse(
@@ -117,6 +125,11 @@ export function createDesktopApi(ipc: IpcRendererLike): CodraDesktopApi {
             IPC_CHANNELS.remoteLogin,
             RemoteAuthProviderSchema.parse(provider),
           ),
+        );
+      },
+      async logout() {
+        return RemoteAccountStatusSchema.parse(
+          await ipc.invoke(IPC_CHANNELS.remoteLogout),
         );
       },
       async activate() {

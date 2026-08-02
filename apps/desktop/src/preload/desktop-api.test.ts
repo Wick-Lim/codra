@@ -53,11 +53,20 @@ const descriptor: TerminalDescriptor = {
 
 describe("createDesktopApi", () => {
   it("routes account login and host activation independently", async () => {
+    const signedIn = {
+      state: "signed_in",
+      profile: {
+        displayName: "Jun Hyeog Im",
+        email: "jun@example.com",
+        photoUrl: null,
+      },
+    };
     const ipc = new FakeIpcRenderer(
       new Map<string, unknown>([
         [IPC_CHANNELS.remoteGetState, { state: "idle" }],
         [IPC_CHANNELS.remoteGetAuthState, { state: "signed_out" }],
-        [IPC_CHANNELS.remoteLogin, { state: "signed_in" }],
+        [IPC_CHANNELS.remoteLogin, signedIn],
+        [IPC_CHANNELS.remoteLogout, { state: "signed_out" }],
         [IPC_CHANNELS.remoteActivate, { state: "online" }],
         [IPC_CHANNELS.remoteDeactivate, { state: "idle" }],
       ]),
@@ -72,25 +81,28 @@ describe("createDesktopApi", () => {
     await expect(api.remote.getAuthState()).resolves.toEqual({
       state: "signed_out",
     });
-    await expect(api.remote.login("google")).resolves.toEqual({
-      state: "signed_in",
-    });
+    await expect(api.remote.login("google")).resolves.toEqual(signedIn);
+    await expect(api.remote.logout()).resolves.toEqual({ state: "signed_out" });
     await expect(api.remote.activate()).resolves.toEqual({ state: "online" });
     await expect(api.remote.deactivate()).resolves.toEqual({ state: "idle" });
     ipc.emit(IPC_CHANNELS.remoteState, { state: "activating" });
     ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "" });
-    ipc.emit(IPC_CHANNELS.remoteState, { state: "error", message: "REMOTE_ACTIVATION_FAILED" });
-    ipc.emit(IPC_CHANNELS.remoteAuthState, { state: "signed_in" });
+    ipc.emit(IPC_CHANNELS.remoteState, {
+      state: "error",
+      message: "REMOTE_ACTIVATION_FAILED",
+    });
+    ipc.emit(IPC_CHANNELS.remoteAuthState, signedIn);
 
     expect(received).toEqual([
       { state: "activating" },
       { state: "error", message: "REMOTE_ACTIVATION_FAILED" },
     ]);
-    expect(receivedAuth).toEqual([{ state: "signed_in" }]);
-    expect(ipc.invocations.slice(-5)).toEqual([
+    expect(receivedAuth).toEqual([signedIn]);
+    expect(ipc.invocations.slice(-6)).toEqual([
       { channel: IPC_CHANNELS.remoteGetState, args: [] },
       { channel: IPC_CHANNELS.remoteGetAuthState, args: [] },
       { channel: IPC_CHANNELS.remoteLogin, args: ["google"] },
+      { channel: IPC_CHANNELS.remoteLogout, args: [] },
       { channel: IPC_CHANNELS.remoteActivate, args: [] },
       { channel: IPC_CHANNELS.remoteDeactivate, args: [] },
     ]);
@@ -133,6 +145,49 @@ describe("createDesktopApi", () => {
       },
       { channel: IPC_CHANNELS.terminalClose, args: [terminalId] },
     ]);
+  });
+
+  it("loads and validates the installed agent registry", async () => {
+    const agents = [
+      {
+        kind: "codex",
+        label: "Codex CLI",
+        description: "OpenAI's coding agent for repository work.",
+        available: true,
+        supportsYolo: true,
+        modelRequired: false,
+        efforts: [{ id: "high", label: "High" }],
+        models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
+        installHint: "Install Codex CLI to use this runtime.",
+      },
+      {
+        kind: "gemini",
+        label: "Gemini CLI",
+        description: "Google's open-source terminal coding agent.",
+        available: false,
+        supportsYolo: true,
+        modelRequired: false,
+        efforts: [],
+        models: [{ id: "auto", label: "Auto" }],
+        installHint: "Install @google/gemini-cli to use this runtime.",
+      },
+    ];
+    const ipc = new FakeIpcRenderer(
+      new Map<string, unknown>([[IPC_CHANNELS.agentList, agents]]),
+    );
+    const api = createDesktopApi(ipc);
+
+    await expect(api.agents.list()).resolves.toEqual(agents);
+    expect(ipc.invocations).toEqual([
+      { channel: IPC_CHANNELS.agentList, args: [] },
+    ]);
+
+    const malformed = createDesktopApi(
+      new FakeIpcRenderer(
+        new Map([[IPC_CHANNELS.agentList, [{ ...agents[0], kind: "shell" }]]]),
+      ),
+    );
+    await expect(malformed.agents.list()).rejects.toThrow();
   });
 
   it.each([

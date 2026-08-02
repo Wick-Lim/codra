@@ -7,7 +7,9 @@ export const remoteAccountBootstrapBinding = "password-test-only-main" as const;
 export async function bootstrapRemoteAuth(
   runtime: FirebaseRuntime,
   provider: "google" | "email_password",
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) throw new Error("REMOTE_LOGIN_CANCELLED");
   if (provider !== "email_password")
     throw new Error("AUTH_PROVIDER_UNAVAILABLE");
   const email = process.env.CODRA_REMOTE_TEST_EMAIL;

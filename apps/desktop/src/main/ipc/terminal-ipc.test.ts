@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   IPC_CHANNELS,
+  type AgentRuntime,
   type TerminalDescriptor,
   type TerminalOutputChunk,
 } from "@codra/protocol";
@@ -96,11 +97,37 @@ function createIpcHarness() {
     ),
     removeHandler: vi.fn((channel: string) => handlers.delete(channel)),
   };
+  const agents: AgentRuntime[] = [
+    {
+      kind: "codex",
+      label: "Codex CLI",
+      description: "OpenAI's coding agent for repository work.",
+      available: true,
+      supportsYolo: true,
+      modelRequired: false,
+      efforts: [{ id: "high", label: "High" }],
+      models: [{ id: "gpt-5.6-sol", label: "GPT-5.6-Sol" }],
+      installHint: "Install Codex CLI to use this runtime.",
+    },
+    {
+      kind: "gemini",
+      label: "Gemini CLI",
+      description: "Google's open-source terminal coding agent.",
+      available: false,
+      supportsYolo: true,
+      modelRequired: false,
+      efforts: [],
+      models: [{ id: "auto", label: "Auto" }],
+      installHint: "Install @google/gemini-cli to use this runtime.",
+    },
+  ];
+  const listAgents = vi.fn(() => agents);
   const unregister = registerTerminalIpc({
     ipc,
     manager,
     windows: () => windows,
     isTrustedRendererUrl: (url) => url === trustedRendererUrl,
+    listAgents,
   });
 
   const trustedEvent = () => ({
@@ -110,6 +137,7 @@ function createIpcHarness() {
 
   return {
     manager,
+    listAgents,
     windows,
     ipc,
     unregister,
@@ -136,6 +164,18 @@ function createIpcHarness() {
 }
 
 describe("registerTerminalIpc", () => {
+  it("returns validated local agent availability to a trusted renderer", async () => {
+    const harness = createIpcHarness();
+
+    await expect(
+      harness.handlers.invoke(IPC_CHANNELS.agentList),
+    ).resolves.toMatchObject([
+      { kind: "codex", available: true },
+      { kind: "gemini", available: false },
+    ]);
+    expect(harness.listAgents).toHaveBeenCalledOnce();
+  });
+
   it("validates create requests before invoking the manager", async () => {
     const harness = createIpcHarness();
 

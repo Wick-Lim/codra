@@ -19,6 +19,7 @@ export interface RemoteHostControllerPort {
   getStatus(): RemoteHostStatus;
   getAccountStatus(): RemoteAccountStatus;
   login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus>;
+  logout(): Promise<RemoteAccountStatus>;
   activate(): Promise<RemoteHostStatus>;
   deactivate(): Promise<RemoteHostStatus>;
   onStatusChanged(listener: (status: RemoteHostStatus) => void): () => void;
@@ -119,6 +120,13 @@ export function registerRemoteIpc({
       },
     ],
     [
+      IPC_CHANNELS.remoteLogout,
+      async (event) => {
+        authorize(event);
+        return RemoteAccountStatusSchema.parse(await controller.logout());
+      },
+    ],
+    [
       IPC_CHANNELS.remoteActivate,
       async (event) => {
         authorize(event);
@@ -141,12 +149,7 @@ export function registerRemoteIpc({
       registeredChannels.push(channel);
     }
     unsubscribe = controller.onStatusChanged((status) =>
-      sendToLiveWindows(
-        windows,
-        isTrustedRendererUrl,
-        status,
-        reportError,
-      ),
+      sendToLiveWindows(windows, isTrustedRendererUrl, status, reportError),
     );
     const unsubscribeAccount = controller.onAccountStatusChanged((status) =>
       sendAccountStatusToLiveWindows(

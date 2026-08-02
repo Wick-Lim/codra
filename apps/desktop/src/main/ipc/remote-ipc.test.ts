@@ -24,7 +24,8 @@ function sender() {
     mainFrame: { url: "file:///trusted/index.html" },
     isDestroyed: () => false,
     getURL: () => "file:///trusted/index.html",
-    send: (channel: string, payload: unknown) => sends.push({ channel, payload }),
+    send: (channel: string, payload: unknown) =>
+      sends.push({ channel, payload }),
   };
   return {
     event: { sender: webContents, senderFrame: webContents.mainFrame },
@@ -43,7 +44,19 @@ function controller() {
     getAccountStatus: () => accountStatus,
     login: vi.fn(async (provider: "google" | "email_password") => {
       expect(provider).toBe("google");
-      accountStatus = { state: "signed_in" };
+      accountStatus = {
+        state: "signed_in",
+        profile: {
+          displayName: "Jun Hyeog Im",
+          email: "jun@example.com",
+          photoUrl: null,
+        },
+      };
+      accountListener?.(accountStatus);
+      return accountStatus;
+    }),
+    logout: vi.fn(async () => {
+      accountStatus = { state: "signed_out" };
       accountListener?.(accountStatus);
       return accountStatus;
     }),
@@ -88,7 +101,9 @@ describe("registerRemoteIpc", () => {
       isTrustedRendererUrl: (url) => url.startsWith("file:///trusted/"),
     });
 
-    expect(ipc.handlers.get(IPC_CHANNELS.remoteGetState)?.(client.event)).toEqual({
+    expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteGetState)?.(client.event),
+    ).toEqual({
       state: "idle",
     });
     expect(
@@ -96,14 +111,33 @@ describe("registerRemoteIpc", () => {
     ).toEqual({ state: "signed_out" });
     await expect(
       ipc.handlers.get(IPC_CHANNELS.remoteLogin)?.(client.event, "google"),
-    ).resolves.toEqual({ state: "signed_in" });
+    ).resolves.toEqual({
+      state: "signed_in",
+      profile: {
+        displayName: "Jun Hyeog Im",
+        email: "jun@example.com",
+        photoUrl: null,
+      },
+    });
     expect(host.login).toHaveBeenCalledOnce();
     expect(client.sends).toEqual([
       {
         channel: IPC_CHANNELS.remoteAuthState,
-        payload: { state: "signed_in" },
+        payload: {
+          state: "signed_in",
+          profile: {
+            displayName: "Jun Hyeog Im",
+            email: "jun@example.com",
+            photoUrl: null,
+          },
+        },
       },
     ]);
+
+    await expect(
+      ipc.handlers.get(IPC_CHANNELS.remoteLogout)?.(client.event),
+    ).resolves.toEqual({ state: "signed_out" });
+    expect(host.logout).toHaveBeenCalledOnce();
 
     await expect(
       ipc.handlers.get(IPC_CHANNELS.remoteActivate)?.(client.event),

@@ -159,7 +159,10 @@ describe("desktop login loopback", () => {
 
   it("recovers a persisted identity when its server device is missing", () => {
     expect(
-      shouldRetryDesktopLoginAsRegister("resume", new Error("DEVICE_NOT_FOUND")),
+      shouldRetryDesktopLoginAsRegister(
+        "resume",
+        new Error("DEVICE_NOT_FOUND"),
+      ),
     ).toBe(true);
     expect(
       shouldRetryDesktopLoginAsRegister("resume", new Error("DEVICE_DISABLED")),

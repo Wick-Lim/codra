@@ -93,15 +93,20 @@ describe("desktop login protocol", () => {
       pkceVerifier: verifier,
       deviceSignature: signature,
     });
-    expect(DesktopLoginCancelRequestSchema.parse({ attemptId, state })).toEqual({
-      attemptId,
-      state,
-    });
+    expect(DesktopLoginCancelRequestSchema.parse({ attemptId, state })).toEqual(
+      {
+        attemptId,
+        state,
+      },
+    );
   });
 
   it("rejects malformed UUIDs in desktop login requests", () => {
     expect(() =>
-      DesktopLoginStartRequestSchema.parse({ ...startRequest, attemptId: "no" }),
+      DesktopLoginStartRequestSchema.parse({
+        ...startRequest,
+        attemptId: "no",
+      }),
     ).toThrow();
     expect(() =>
       DesktopLoginStartRequestSchema.parse({ ...startRequest, deviceId: "no" }),
@@ -137,7 +142,10 @@ describe("desktop login protocol", () => {
       }).callbackPort,
     ).toBe(65_535);
     expect(() =>
-      DesktopLoginStartRequestSchema.parse({ ...startRequest, callbackPort: 0 }),
+      DesktopLoginStartRequestSchema.parse({
+        ...startRequest,
+        callbackPort: 0,
+      }),
     ).toThrow();
     expect(() =>
       DesktopLoginStartRequestSchema.parse({
@@ -167,7 +175,10 @@ describe("desktop login protocol", () => {
       }),
     ).toThrow();
     expect(() =>
-      DesktopLoginStartRequestSchema.parse({ ...startRequest, nonce: `${nonce}=` }),
+      DesktopLoginStartRequestSchema.parse({
+        ...startRequest,
+        nonce: `${nonce}=`,
+      }),
     ).toThrow();
     expect(() =>
       DesktopLoginAuthorizeRequestSchema.parse({
@@ -241,11 +252,16 @@ describe("desktop login protocol", () => {
         device: remoteDevice,
       }).device,
     ).toEqual(remoteDevice);
-    expect(DesktopLoginCancelResponseSchema.parse({ cancelled: true })).toEqual({
-      cancelled: true,
-    });
+    expect(DesktopLoginCancelResponseSchema.parse({ cancelled: true })).toEqual(
+      {
+        cancelled: true,
+      },
+    );
     expect(() =>
-      DesktopLoginCancelResponseSchema.parse({ cancelled: true, unknown: true }),
+      DesktopLoginCancelResponseSchema.parse({
+        cancelled: true,
+        unknown: true,
+      }),
     ).toThrow();
   });
 

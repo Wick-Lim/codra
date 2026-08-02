@@ -63,6 +63,40 @@ describe("NodePtyFactory", () => {
     expect(kill).toHaveBeenCalledWith();
   });
 
+  it("spawns an agent executable directly with its structured argv", () => {
+    vi.spyOn(nodePty, "spawn").mockReturnValue({
+      pid: 42,
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      onData: vi.fn(() => ({ dispose: vi.fn() })),
+      onExit: vi.fn(() => ({ dispose: vi.fn() })),
+    } as unknown as nodePty.IPty);
+    const resolveAgent = vi.fn(() => ({
+      executable: "/opt/homebrew/bin/codex",
+      args: ["--dangerously-bypass-approvals-and-sandbox", "--", "Fix it"],
+      title: "Codex",
+    }));
+
+    new NodePtyFactory(resolveAgent).spawn({
+      cwd: "/workspace",
+      cols: 100,
+      rows: 30,
+      agent: { kind: "codex", yolo: true, prompt: "Fix it" },
+    });
+
+    expect(resolveAgent).toHaveBeenCalledWith({
+      kind: "codex",
+      yolo: true,
+      prompt: "Fix it",
+    });
+    expect(nodePty.spawn).toHaveBeenCalledWith(
+      "/opt/homebrew/bin/codex",
+      ["--dangerously-bypass-approvals-and-sandbox", "--", "Fix it"],
+      expect.objectContaining({ cwd: "/workspace" }),
+    );
+  });
+
   it("runs zsh and reaps its child after observing real command output", async () => {
     vi.stubEnv("SHELL", "/bin/zsh");
     const pty = new NodePtyFactory().spawn({

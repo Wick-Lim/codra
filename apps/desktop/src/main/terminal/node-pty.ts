@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import * as nodePty from "node-pty";
 import type { CreateTerminalRequest } from "@codra/protocol";
 import type { PtyFactory, PtyHandle } from "./contracts";
+import { resolveAgentCommand, type AgentCommand } from "./agent-runtime";
 
 const MIN_COLS = 20;
 const MAX_COLS = 400;
@@ -13,8 +14,20 @@ function bound(value: number, minimum: number, maximum: number): number {
 }
 
 export class NodePtyFactory implements PtyFactory {
+  constructor(
+    private readonly resolveAgent: (
+      launch: NonNullable<CreateTerminalRequest["agent"]>,
+    ) => AgentCommand = resolveAgentCommand,
+  ) {}
+
   spawn(request: CreateTerminalRequest): PtyHandle {
-    const pty = nodePty.spawn(process.env.SHELL || "/bin/zsh", ["-l"], {
+    const command = request.agent
+      ? this.resolveAgent(request.agent)
+      : {
+          executable: process.env.SHELL || "/bin/zsh",
+          args: ["-l"],
+        };
+    const pty = nodePty.spawn(command.executable, command.args, {
       cwd: request.cwd ?? homedir(),
       cols: bound(request.cols, MIN_COLS, MAX_COLS),
       rows: bound(request.rows, MIN_ROWS, MAX_ROWS),

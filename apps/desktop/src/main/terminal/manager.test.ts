@@ -267,6 +267,26 @@ describe("TerminalManager", () => {
     expect(changed).toEqual([terminal]);
   });
 
+  it("labels an agent terminal with the selected runtime", async () => {
+    const { manager, factory } = createHarness();
+    const agentRequest = {
+      ...request,
+      agent: {
+        kind: "claude" as const,
+        yolo: false,
+        prompt: "Review this repository",
+      },
+    };
+
+    const terminal = await manager.create(agentRequest);
+
+    expect(terminal.title).toBe("Claude");
+    expect(factory.spawn).toHaveBeenCalledWith({
+      ...agentRequest,
+      cwd: expect.any(String),
+    });
+  });
+
   it("rolls back a partially persisted descriptor when save fails", async () => {
     const repository = new MemoryRepository();
     const saveError = new Error("save failed after commit");
@@ -280,9 +300,7 @@ describe("TerminalManager", () => {
     expect(descriptor).toMatchObject({ state: "exited", exitCode: -1 });
     expect(pty.kills).toBe(1);
     expect(pty.subscriptions).toEqual({ data: 0, exit: 0 });
-    await expect(manager.close(descriptor.id)).rejects.toMatchObject({
-      code: "TERMINAL_NOT_FOUND",
-    });
+    await expect(manager.close(descriptor.id)).resolves.toBeUndefined();
     expect(reporter).toHaveBeenCalledWith(saveError);
   });
 
@@ -445,6 +463,24 @@ describe("TerminalManager", () => {
     ).rejects.toMatchObject({
       code: "TERMINAL_NOT_FOUND",
     } satisfies Partial<TerminalError>);
+  });
+
+  it("treats closing a persisted exited terminal as an idempotent success", async () => {
+    const repository = new MemoryRepository();
+    const exited = {
+      id: randomUUID(),
+      title: "finished",
+      cwd: "/workspace",
+      cols: 80,
+      rows: 24,
+      state: "exited" as const,
+      createdAt: new Date().toISOString(),
+      exitCode: 0,
+    };
+    await repository.save(exited);
+    const { manager } = createHarness({ repository });
+
+    await expect(manager.close(exited.id)).resolves.toBeUndefined();
   });
 
   it("replays persisted scrollback without a running PTY", async () => {

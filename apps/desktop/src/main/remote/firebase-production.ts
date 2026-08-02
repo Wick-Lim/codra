@@ -7,7 +7,9 @@ import type { FirebaseRuntime } from "@codra/firebase";
 
 export const remoteFirebaseConfigBinding = "production-main" as const;
 export const remoteFirebaseConfig = productionPublicConfig;
-export function createRemoteFirebaseRuntime(appName = "codra-host"): FirebaseRuntime {
+export function createRemoteFirebaseRuntime(
+  appName = "codra-host",
+): FirebaseRuntime {
   return createFirebaseRuntime({
     mode: "production",
     desktopAppCheckFirebaseAppId:

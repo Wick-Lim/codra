@@ -1,5 +1,7 @@
 import React from "react";
 import type {
+  AgentLaunchRequest,
+  AgentRuntime,
   RemoteAccountStatus,
   RemoteAuthProvider,
   RemoteHostStatus,
@@ -7,6 +9,9 @@ import type {
 import { TerminalPane } from "./terminal/TerminalPane";
 import { TerminalSidebar } from "./terminal/TerminalSidebar";
 import { useTerminals } from "./terminal/useTerminals";
+import { SignInDialog } from "./account/SignInDialog";
+import { SettingsDialog } from "./settings/SettingsDialog";
+import { NewAgentDialog } from "./agent/NewAgentDialog";
 
 export default function App() {
   const {
@@ -14,6 +19,7 @@ export default function App() {
     activeTerminalId,
     activeTerminal,
     createTerminal,
+    createAgent,
     selectTerminal,
     closeTerminal,
   } = useTerminals();
@@ -23,23 +29,38 @@ export default function App() {
   const [accountStatus, setAccountStatus] = React.useState<RemoteAccountStatus>(
     { state: "signed_out" },
   );
+  const [signInOpen, setSignInOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [agentDialogOpen, setAgentDialogOpen] = React.useState(false);
+  const [agentRuntimes, setAgentRuntimes] = React.useState<AgentRuntime[]>([]);
+  const [agentStarting, setAgentStarting] = React.useState(false);
+  const [agentError, setAgentError] = React.useState<string>();
 
   React.useEffect(() => {
     const stopListening = window.codra.remote.onStateChanged(setRemoteStatus);
-    const stopListeningAccount = window.codra.remote.onAuthStateChanged(
-      setAccountStatus,
-    );
+    const stopListeningAccount =
+      window.codra.remote.onAuthStateChanged(setAccountStatus);
     void window.codra.remote
       .getState()
       .then(setRemoteStatus)
       .catch(() =>
-        setRemoteStatus({ state: "error", message: "REMOTE_STATUS_UNAVAILABLE" }),
+        setRemoteStatus({
+          state: "error",
+          message: "REMOTE_STATUS_UNAVAILABLE",
+        }),
       );
+    void window.codra.agents
+      .list()
+      .then(setAgentRuntimes)
+      .catch(() => setAgentError("Agent CLI discovery failed."));
     void window.codra.remote
       .getAuthState()
       .then(setAccountStatus)
       .catch(() =>
-        setAccountStatus({ state: "error", message: "REMOTE_AUTH_UNAVAILABLE" }),
+        setAccountStatus({
+          state: "error",
+          message: "REMOTE_AUTH_UNAVAILABLE",
+        }),
       );
     return () => {
       stopListening();
@@ -47,7 +68,35 @@ export default function App() {
     };
   }, []);
 
+  function openAgentDialog(): void {
+    setAgentDialogOpen(true);
+    setAgentError(undefined);
+    void window.codra.agents
+      .list()
+      .then(setAgentRuntimes)
+      .catch(() => setAgentError("Agent CLI discovery failed."));
+  }
+
+  async function startAgent(request: AgentLaunchRequest): Promise<void> {
+    setAgentStarting(true);
+    setAgentError(undefined);
+    try {
+      await createAgent(request);
+      setAgentDialogOpen(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      setAgentError(
+        message.includes("AGENT_CLI_NOT_FOUND")
+          ? "The selected agent CLI is no longer available."
+          : "The agent could not be started.",
+      );
+    } finally {
+      setAgentStarting(false);
+    }
+  }
+
   async function loginRemote(provider: RemoteAuthProvider): Promise<void> {
+    setSignInOpen(false);
     setAccountStatus({ state: "signing_in" });
     try {
       setAccountStatus(await window.codra.remote.login(provider));
@@ -60,6 +109,15 @@ export default function App() {
     }
   }
 
+  async function logoutRemote(): Promise<void> {
+    try {
+      setAccountStatus(await window.codra.remote.logout());
+      setRemoteStatus({ state: "idle" });
+    } catch {
+      setAccountStatus({ state: "error", message: "REMOTE_LOGOUT_FAILED" });
+    }
+  }
+
   async function activateRemote(): Promise<void> {
     setRemoteStatus({ state: "activating" });
     try {
@@ -68,7 +126,10 @@ export default function App() {
       try {
         setRemoteStatus(await window.codra.remote.getState());
       } catch {
-        setRemoteStatus({ state: "error", message: "REMOTE_ACTIVATION_FAILED" });
+        setRemoteStatus({
+          state: "error",
+          message: "REMOTE_ACTIVATION_FAILED",
+        });
       }
     }
   }
@@ -77,9 +138,25 @@ export default function App() {
     try {
       setRemoteStatus(await window.codra.remote.deactivate());
     } catch {
-      setRemoteStatus({ state: "error", message: "REMOTE_DEACTIVATION_FAILED" });
+      setRemoteStatus({
+        state: "error",
+        message: "REMOTE_DEACTIVATION_FAILED",
+      });
     }
   }
+  function changeRemote(enabled: boolean): void {
+    if (enabled) void activateRemote();
+    else void deactivateRemote();
+  }
+
+  const remoteStatusLabel =
+    remoteStatus.state === "online"
+      ? "online"
+      : remoteStatus.state === "activating"
+        ? "starting"
+        : remoteStatus.state === "error"
+          ? "attention"
+          : "offline";
   const stateLabel = activeTerminal
     ? activeTerminal.state === "running"
       ? "Running"
@@ -93,14 +170,14 @@ export default function App() {
           <TerminalSidebar
             terminals={terminals}
             activeId={activeTerminalId}
-            onCreate={() => void createTerminal()}
+            onCreateAgent={openAgentDialog}
+            onCreateTerminal={() => void createTerminal()}
             onSelect={selectTerminal}
             onClose={(terminalId) => void closeTerminal(terminalId)}
             accountStatus={accountStatus}
-            remoteStatus={remoteStatus}
-            onRemoteLogin={(provider) => void loginRemote(provider)}
-            onRemoteActivate={() => void activateRemote()}
-            onRemoteDeactivate={() => void deactivateRemote()}
+            onSignIn={() => setSignInOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onLogout={() => void logoutRemote()}
           />
 
           <section
@@ -131,6 +208,17 @@ export default function App() {
           <span className="status-divider" aria-hidden="true" />
           <span>{stateLabel}</span>
           <span className="status-spacer" />
+          <button
+            className="status-remote-button"
+            type="button"
+            data-state={remoteStatus.state}
+            aria-label={`Remote ${remoteStatusLabel} — open settings`}
+            onClick={() => setSettingsOpen(true)}
+          >
+            <span className="status-remote-dot" aria-hidden="true" />
+            Remote {remoteStatusLabel}
+          </button>
+          <span className="status-divider" aria-hidden="true" />
           <span>
             {activeTerminal
               ? `${activeTerminal.cols} × ${activeTerminal.rows}`
@@ -138,6 +226,36 @@ export default function App() {
           </span>
         </footer>
       </main>
+      <SignInDialog
+        open={signInOpen}
+        busy={accountStatus.state === "signing_in"}
+        message={
+          accountStatus.state === "error" ? accountStatus.message : undefined
+        }
+        onClose={() => setSignInOpen(false)}
+        onProvider={(provider) => void loginRemote(provider)}
+      />
+      <NewAgentDialog
+        open={agentDialogOpen}
+        agents={agentRuntimes}
+        busy={agentStarting}
+        error={agentError}
+        onClose={() => {
+          if (!agentStarting) setAgentDialogOpen(false);
+        }}
+        onStart={(request) => void startAgent(request)}
+      />
+      <SettingsDialog
+        open={settingsOpen}
+        accountStatus={accountStatus}
+        remoteStatus={remoteStatus}
+        onClose={() => setSettingsOpen(false)}
+        onRemoteChange={changeRemote}
+        onSignIn={() => {
+          setSettingsOpen(false);
+          setSignInOpen(true);
+        }}
+      />
     </React.Fragment>
   );
 }

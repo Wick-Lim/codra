@@ -8,7 +8,9 @@ export interface DesktopAuthQuery {
   state: string;
 }
 
-export function parseDesktopAuthQuery(search: string): DesktopAuthQuery | undefined {
+export function parseDesktopAuthQuery(
+  search: string,
+): DesktopAuthQuery | undefined {
   const query = new URLSearchParams(search);
   const keys = [...query.keys()];
   if (

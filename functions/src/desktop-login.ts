@@ -1,6 +1,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
-import { HttpsError, onCall, onRequest, type CallableRequest } from "firebase-functions/v2/https";
+import {
+  HttpsError,
+  onCall,
+  onRequest,
+  type CallableRequest,
+} from "firebase-functions/v2/https";
 import { z } from "zod";
 import {
   ACCOUNT_AUTH_FUTURE_SKEW_MS,
@@ -96,7 +101,11 @@ export function validateRawDesktopLoginRequest(
   const firstContentType = Array.isArray(contentType)
     ? contentType[0]
     : contentType;
-  if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/iu.test(firstContentType ?? ""))
+  if (
+    !/^application\/json(?:\s*;\s*charset=utf-8)?$/iu.test(
+      firstContentType ?? "",
+    )
+  )
     return "CONTENT_TYPE_REQUIRED";
   if ((request.rawBody?.byteLength ?? 0) > MAX_REQUEST_BODY_BYTES)
     return "REQUEST_TOO_LARGE";
@@ -126,7 +135,8 @@ function rawBody(request: {
   body?: unknown;
 }): Buffer | undefined {
   if (Buffer.isBuffer(request.rawBody)) return request.rawBody;
-  if (typeof request.body === "string") return Buffer.from(request.body, "utf8");
+  if (typeof request.body === "string")
+    return Buffer.from(request.body, "utf8");
   if (request.body === undefined) return undefined;
   try {
     return Buffer.from(JSON.stringify(request.body), "utf8");
@@ -149,7 +159,8 @@ function parseRawJson<T>(
     throw new HttpsError("invalid-argument", "INVALID_REQUEST");
   }
   const parsed = schema.safeParse(parsedJson);
-  if (!parsed.success) throw new HttpsError("invalid-argument", "INVALID_REQUEST");
+  if (!parsed.success)
+    throw new HttpsError("invalid-argument", "INVALID_REQUEST");
   return parsed.data;
 }
 
@@ -194,7 +205,11 @@ async function withRawDesktopLoginRequest(
     response.status(200).json(result);
   } catch (error) {
     if (error instanceof HttpsError) {
-      sendRawError(response, error.message, error.code === "not-found" ? 404 : 400);
+      sendRawError(
+        response,
+        error.message,
+        error.code === "not-found" ? 404 : 400,
+      );
       return;
     }
     const details =
@@ -213,7 +228,9 @@ async function withRawDesktopLoginRequest(
   }
 }
 
-function parseTransaction(snapshot: { data(): Record<string, unknown> | undefined }): DesktopLoginTransaction {
+function parseTransaction(snapshot: {
+  data(): Record<string, unknown> | undefined;
+}): DesktopLoginTransaction {
   const data = snapshot.data();
   if (!data) throw new HttpsError("not-found", "LOGIN_NOT_FOUND");
   return data as unknown as DesktopLoginTransaction;
@@ -250,7 +267,9 @@ export function validateGoogleLoginClaims(
   return { uid: input.uid };
 }
 
-function requireGoogleAccount(request: CallableRequest<unknown>): { uid: string } {
+function requireGoogleAccount(request: CallableRequest<unknown>): {
+  uid: string;
+} {
   return validateGoogleLoginClaims({
     uid: request.auth?.uid,
     provider: request.auth?.token.firebase?.sign_in_provider,
@@ -260,7 +279,8 @@ function requireGoogleAccount(request: CallableRequest<unknown>): { uid: string 
 
 function parseCallableInput<T>(schema: z.ZodType<T>, data: unknown): T {
   const parsed = schema.safeParse(data);
-  if (!parsed.success) throw new HttpsError("invalid-argument", "INVALID_REQUEST");
+  if (!parsed.success)
+    throw new HttpsError("invalid-argument", "INVALID_REQUEST");
   return parsed.data;
 }
 
@@ -284,7 +304,10 @@ export function authorizeDesktopLoginTransaction(
   state: string,
   code: string,
   now: Timestamp,
-): Pick<DesktopLoginTransaction, "status" | "ownerUid" | "codeHash" | "codeExpiresAt" | "authorizedAt"> {
+): Pick<
+  DesktopLoginTransaction,
+  "status" | "ownerUid" | "codeHash" | "codeExpiresAt" | "authorizedAt"
+> {
   assertLiveTransaction(transaction, now);
   if (!safeEquals(transaction.stateHash, sha256Base64Url(state)))
     throw new HttpsError("permission-denied", "LOGIN_STATE_INVALID");
@@ -448,7 +471,10 @@ export const authorizeDesktopLogin = onCall(
   { region: FUNCTION_REGION },
   async (request) => {
     const account = requireGoogleAccount(request);
-    const input = parseCallableInput(DesktopLoginAuthorizeRequestSchema, request.data);
+    const input = parseCallableInput(
+      DesktopLoginAuthorizeRequestSchema,
+      request.data,
+    );
     const ref = adminDb.doc(`${TRANSACTION_COLLECTION}/${input.attemptId}`);
     const now = Timestamp.now();
 
@@ -498,63 +524,77 @@ export const desktopLoginRedeem = onRequest(
       const input = parseRawJson(DesktopLoginRedeemRequestSchema, request);
       const ref = adminDb.doc(`${TRANSACTION_COLLECTION}/${input.attemptId}`);
       const now = Timestamp.now();
-      const device = await adminDb.runTransaction(async (firestoreTransaction) => {
-        const loginSnapshot = await firestoreTransaction.get(ref);
-        const login = parseTransaction(loginSnapshot);
-        await validateDesktopLoginRedeem(login, input, now);
-        if (!login.ownerUid)
-          throw new HttpsError("failed-precondition", "LOGIN_OWNER_MISSING");
-        const ownerUid = login.ownerUid;
-        const deviceRef = adminDb.doc(`users/${ownerUid}/devices/${login.deviceId}`);
-        const deviceSnapshot = await firestoreTransaction.get(deviceRef);
-        const current = deviceSnapshot.exists ? deviceSnapshot.data() : undefined;
-        let generation = 1;
-        let createdAt = now;
-        if (current) {
-          if (
-            current.ownerUid !== ownerUid ||
-            current.kind !== "host" ||
-            current.keyThumbprint !== login.keyThumbprint
-          ) {
-            throw new HttpsError("already-exists", "DEVICE_KEY_MISMATCH");
+      const device = await adminDb.runTransaction(
+        async (firestoreTransaction) => {
+          const loginSnapshot = await firestoreTransaction.get(ref);
+          const login = parseTransaction(loginSnapshot);
+          await validateDesktopLoginRedeem(login, input, now);
+          if (!login.ownerUid)
+            throw new HttpsError("failed-precondition", "LOGIN_OWNER_MISSING");
+          const ownerUid = login.ownerUid;
+          const deviceRef = adminDb.doc(
+            `users/${ownerUid}/devices/${login.deviceId}`,
+          );
+          const deviceSnapshot = await firestoreTransaction.get(deviceRef);
+          const current = deviceSnapshot.exists
+            ? deviceSnapshot.data()
+            : undefined;
+          let generation = 1;
+          let createdAt = now;
+          if (current) {
+            if (
+              current.ownerUid !== ownerUid ||
+              current.kind !== "host" ||
+              current.keyThumbprint !== login.keyThumbprint
+            ) {
+              throw new HttpsError("already-exists", "DEVICE_KEY_MISMATCH");
+            }
+            if (login.action === "register")
+              throw new HttpsError(
+                "already-exists",
+                "DEVICE_ALREADY_REGISTERED",
+              );
+            if (login.action === "resume" && current.active !== true)
+              throw new HttpsError("failed-precondition", "DEVICE_DISABLED");
+            if (login.action === "reenable" && current.active === true)
+              throw new HttpsError(
+                "failed-precondition",
+                "DEVICE_ALREADY_ACTIVE",
+              );
+            generation =
+              login.action === "reenable"
+                ? Number(current.generation) + 1
+                : Number(current.generation);
+            createdAt = (current.createdAt as Timestamp | undefined) ?? now;
+          } else if (login.action === "resume") {
+            throw new HttpsError("not-found", "DEVICE_NOT_FOUND");
+          } else if (login.action === "reenable") {
+            throw new HttpsError("not-found", "DEVICE_NOT_FOUND");
           }
-          if (login.action === "register")
-            throw new HttpsError("already-exists", "DEVICE_ALREADY_REGISTERED");
-          if (login.action === "resume" && current.active !== true)
-            throw new HttpsError("failed-precondition", "DEVICE_DISABLED");
-          if (login.action === "reenable" && current.active === true)
-            throw new HttpsError("failed-precondition", "DEVICE_ALREADY_ACTIVE");
-          generation =
-            login.action === "reenable" ? Number(current.generation) + 1 : Number(current.generation);
-          createdAt = (current.createdAt as Timestamp | undefined) ?? now;
-        } else if (login.action === "resume") {
-          throw new HttpsError("not-found", "DEVICE_NOT_FOUND");
-        } else if (login.action === "reenable") {
-          throw new HttpsError("not-found", "DEVICE_NOT_FOUND");
-        }
-        const expiresAt = Timestamp.fromMillis(now.toMillis() + 120_000);
-        const stored = {
-          deviceId: login.deviceId,
-          ownerUid,
-          kind: "host" as const,
-          displayName: login.displayName,
-          publicKeyJwk: login.publicKeyJwk,
-          keyThumbprint: login.keyThumbprint,
-          active: true,
-          generation,
-          remoteAccessEnabled: true,
-          capabilities: ["terminal"],
-          createdAt,
-          lastSeenAt: now,
-          expiresAt,
-        };
-        firestoreTransaction.set(deviceRef, stored);
-        firestoreTransaction.update(ref, {
-          status: "consumed",
-          consumedAt: now,
-        });
-        return stored;
-      });
+          const expiresAt = Timestamp.fromMillis(now.toMillis() + 120_000);
+          const stored = {
+            deviceId: login.deviceId,
+            ownerUid,
+            kind: "host" as const,
+            displayName: login.displayName,
+            publicKeyJwk: login.publicKeyJwk,
+            keyThumbprint: login.keyThumbprint,
+            active: true,
+            generation,
+            remoteAccessEnabled: true,
+            capabilities: ["terminal"],
+            createdAt,
+            lastSeenAt: now,
+            expiresAt,
+          };
+          firestoreTransaction.set(deviceRef, stored);
+          firestoreTransaction.update(ref, {
+            status: "consumed",
+            consumedAt: now,
+          });
+          return stored;
+        },
+      );
       const token = await adminAuth.createCustomToken(
         device.ownerUid,
         desktopLoginTokenClaims(device),
@@ -574,18 +614,24 @@ export const desktopLoginCancel = onRequest(
       const input = parseRawJson(DesktopLoginCancelRequestSchema, request);
       const ref = adminDb.doc(`${TRANSACTION_COLLECTION}/${input.attemptId}`);
       const now = Timestamp.now();
-      const cancelled = await adminDb.runTransaction(async (firestoreTransaction) => {
-        const snapshot = await firestoreTransaction.get(ref);
-        const transaction = parseTransaction(snapshot);
-        const result = cancelDesktopLoginTransaction(transaction, input.state, now);
-        if (result.cancelledAt) {
-          firestoreTransaction.update(ref, {
-            status: "cancelled",
-            cancelledAt: result.cancelledAt,
-          });
-        }
-        return result.cancelled;
-      });
+      const cancelled = await adminDb.runTransaction(
+        async (firestoreTransaction) => {
+          const snapshot = await firestoreTransaction.get(ref);
+          const transaction = parseTransaction(snapshot);
+          const result = cancelDesktopLoginTransaction(
+            transaction,
+            input.state,
+            now,
+          );
+          if (result.cancelledAt) {
+            firestoreTransaction.update(ref, {
+              status: "cancelled",
+              cancelledAt: result.cancelledAt,
+            });
+          }
+          return result.cancelled;
+        },
+      );
       return { cancelled };
     }),
 );

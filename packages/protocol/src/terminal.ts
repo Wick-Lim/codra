@@ -5,8 +5,79 @@ export const TerminalSizeSchema = z.object({
   cols: z.number().int().min(20).max(400),
   rows: z.number().int().min(5).max(200),
 });
+export const AgentKindSchema = z.enum(["codex", "claude", "gemini", "ollama"]);
+export const AgentModelIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/,
+    "Model identifiers may only contain CLI-safe model characters",
+  );
+export const AgentEffortIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(32)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/,
+    "Effort identifiers may only contain CLI-safe characters",
+  );
+export const AgentLaunchRequestSchema = z
+  .object({
+    kind: AgentKindSchema,
+    yolo: z.boolean(),
+    model: AgentModelIdSchema.optional(),
+    effort: AgentEffortIdSchema.optional(),
+    prompt: z.string().trim().min(1).max(16_000),
+  })
+  .strict()
+  .superRefine((launch, context) => {
+    if (launch.kind === "ollama" && !launch.model) {
+      context.addIssue({
+        code: "custom",
+        path: ["model"],
+        message: "Ollama requires a model",
+      });
+    }
+    if (launch.kind === "ollama" && launch.yolo) {
+      context.addIssue({
+        code: "custom",
+        path: ["yolo"],
+        message: "Ollama does not support agent approval modes",
+      });
+    }
+  });
+export const AgentEffortOptionSchema = z
+  .object({
+    id: AgentEffortIdSchema,
+    label: z.string().trim().min(1).max(80),
+  })
+  .strict();
+export const AgentModelOptionSchema = z
+  .object({
+    id: AgentModelIdSchema,
+    label: z.string().trim().min(1).max(120),
+    efforts: AgentEffortOptionSchema.array().max(12).optional(),
+  })
+  .strict();
+export const AgentRuntimeSchema = z
+  .object({
+    kind: AgentKindSchema,
+    label: z.string().trim().min(1).max(80),
+    description: z.string().trim().min(1).max(240),
+    available: z.boolean(),
+    supportsYolo: z.boolean(),
+    modelRequired: z.boolean(),
+    efforts: AgentEffortOptionSchema.array().max(12),
+    models: AgentModelOptionSchema.array().max(200),
+    installHint: z.string().trim().min(1).max(240),
+  })
+  .strict();
 export const CreateTerminalRequestSchema = TerminalSizeSchema.extend({
   cwd: z.string().min(1).max(4096).optional(),
+  agent: AgentLaunchRequestSchema.optional(),
 });
 export const WriteTerminalRequestSchema = z.object({
   terminalId: TerminalIdSchema,
@@ -28,6 +99,11 @@ export const ReplayTerminalRequestSchema = z.object({
 });
 
 export type CreateTerminalRequest = z.infer<typeof CreateTerminalRequestSchema>;
+export type AgentKind = z.infer<typeof AgentKindSchema>;
+export type AgentEffortOption = z.infer<typeof AgentEffortOptionSchema>;
+export type AgentModelOption = z.infer<typeof AgentModelOptionSchema>;
+export type AgentLaunchRequest = z.infer<typeof AgentLaunchRequestSchema>;
+export type AgentRuntime = z.infer<typeof AgentRuntimeSchema>;
 export type WriteTerminalRequest = z.infer<typeof WriteTerminalRequestSchema>;
 export type ResizeTerminalRequest = z.infer<typeof ResizeTerminalRequestSchema>;
 export type ReplayTerminalRequest = z.infer<typeof ReplayTerminalRequestSchema>;

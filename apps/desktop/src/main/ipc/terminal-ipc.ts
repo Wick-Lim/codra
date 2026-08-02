@@ -1,4 +1,5 @@
 import {
+  AgentRuntimeSchema,
   CreateTerminalRequestSchema,
   IPC_CHANNELS,
   ReplayTerminalRequestSchema,
@@ -6,12 +7,14 @@ import {
   TerminalIdSchema,
   WriteTerminalRequestSchema,
   type CreateTerminalRequest,
+  type AgentRuntime,
   type ReplayTerminalRequest,
   type ResizeTerminalRequest,
   type TerminalDescriptor,
   type TerminalOutputChunk,
   type WriteTerminalRequest,
 } from "@codra/protocol";
+import { listAgentRuntimes } from "../terminal/agent-runtime";
 import {
   TerminalAdmissionGate,
   type TerminalRequestAdmission,
@@ -47,10 +50,12 @@ export interface RegisterTerminalIpcOptions {
   windows(): readonly BrowserWindowLike[];
   isTrustedRendererUrl(url: string): boolean;
   admission?: TerminalRequestAdmission;
+  listAgents?(): AgentRuntime[] | Promise<AgentRuntime[]>;
   reportError?(error: unknown): void;
 }
 
 const requestChannels = [
+  IPC_CHANNELS.agentList,
   IPC_CHANNELS.terminalList,
   IPC_CHANNELS.terminalCreate,
   IPC_CHANNELS.terminalWrite,
@@ -90,11 +95,19 @@ export function registerTerminalIpc({
   windows,
   isTrustedRendererUrl,
   admission = new TerminalAdmissionGate(),
+  listAgents = listAgentRuntimes,
   reportError = (error) => console.error("Terminal IPC error", error),
 }: RegisterTerminalIpcOptions): () => void {
   const authorize = (event: unknown): void =>
     assertAuthorizedRenderer(event, windows, isTrustedRendererUrl);
   const registrations: readonly [string, IpcHandler][] = [
+    [
+      IPC_CHANNELS.agentList,
+      async (event) => {
+        authorize(event);
+        return AgentRuntimeSchema.array().parse(await listAgents());
+      },
+    ],
     [
       IPC_CHANNELS.terminalList,
       (event) => {

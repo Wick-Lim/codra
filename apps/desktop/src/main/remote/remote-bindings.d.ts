@@ -9,6 +9,7 @@ declare module "@codra/remote-account-bootstrap" {
   export function bootstrapRemoteAuth(
     runtime: FirebaseRuntime,
     provider: "google" | "email_password",
+    signal?: AbortSignal,
   ): Promise<void>;
   export function bootstrapRemoteAccount(
     runtime: FirebaseRuntime,
@@ -20,5 +21,7 @@ declare module "@codra/remote-firebase-config" {
   import type { FirebaseRuntime } from "@codra/firebase";
 
   export const remoteFirebaseConfigBinding: string;
-  export function createRemoteFirebaseRuntime(appName?: string): FirebaseRuntime;
+  export function createRemoteFirebaseRuntime(
+    appName?: string,
+  ): FirebaseRuntime;
 }

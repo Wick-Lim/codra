@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   IPC_CHANNELS,
+  RemoteAccountProfileSchema,
   RemoteAccountStateSchema,
   RemoteAccountStatusSchema,
   RemoteAuthProviderSchema,
@@ -20,7 +21,9 @@ describe("desktop remote IPC contract", () => {
     expect(
       RemoteHostStatusSchema.parse({ state: "error", message: "LOGIN_FAILED" }),
     ).toEqual({ state: "error", message: "LOGIN_FAILED" });
-    expect(() => RemoteHostStatusSchema.parse({ state: "error", secret: "no" })).toThrow();
+    expect(() =>
+      RemoteHostStatusSchema.parse({ state: "error", secret: "no" }),
+    ).toThrow();
   });
 
   it("keeps account authentication independent from host activation", () => {
@@ -30,9 +33,18 @@ describe("desktop remote IPC contract", () => {
     );
     expect(RemoteAccountStateSchema.parse("signed_out")).toBe("signed_out");
     expect(RemoteAccountStateSchema.parse("signing_in")).toBe("signing_in");
-    expect(RemoteAccountStatusSchema.parse({ state: "signed_in" })).toEqual({
-      state: "signed_in",
-    });
+    const profile = {
+      displayName: "Jun Hyeog Im",
+      email: "jun@example.com",
+      photoUrl: "https://lh3.googleusercontent.com/a/avatar",
+    };
+    expect(RemoteAccountProfileSchema.parse(profile)).toEqual(profile);
+    expect(
+      RemoteAccountStatusSchema.parse({ state: "signed_in", profile }),
+    ).toEqual({ state: "signed_in", profile });
+    expect(() =>
+      RemoteAccountStatusSchema.parse({ state: "signed_in" }),
+    ).toThrow();
     expect(
       RemoteAccountStatusSchema.parse({
         state: "error",
@@ -42,6 +54,7 @@ describe("desktop remote IPC contract", () => {
   });
 
   it("freezes remote action and event channel names", () => {
+    expect(IPC_CHANNELS.agentList).toBe("codra:agent:list");
     expect(IPC_CHANNELS.remoteGetState).toBe("codra:remote:get-state");
     expect(IPC_CHANNELS.remoteLogin).toBe("codra:remote:login");
     expect(IPC_CHANNELS.remoteState).toBe("codra:remote:state");
@@ -49,5 +62,6 @@ describe("desktop remote IPC contract", () => {
     expect(IPC_CHANNELS.remoteAuthState).toBe("codra:remote:auth-state");
     expect(IPC_CHANNELS.remoteActivate).toBe("codra:remote:activate");
     expect(IPC_CHANNELS.remoteDeactivate).toBe("codra:remote:deactivate");
+    expect(IPC_CHANNELS.remoteLogout).toBe("codra:remote:logout");
   });
 });

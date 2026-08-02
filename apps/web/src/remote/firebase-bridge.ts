@@ -7,7 +7,10 @@ import {
 } from "firebase/auth";
 import { getApps, initializeApp } from "firebase/app";
 import { getFunctions } from "firebase/functions";
-import { FUNCTION_REGION, productionPublicConfig } from "@codra/protocol/production";
+import {
+  FUNCTION_REGION,
+  productionPublicConfig,
+} from "@codra/protocol/production";
 
 const BRIDGE_APP_NAME = "codra-desktop-auth-bridge";
 

@@ -21,7 +21,11 @@ import {
   bootstrapRemoteAuth,
 } from "@codra/remote-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/remote-firebase-config";
-import { remoteAccountErrorStatus, remoteErrorStatus } from "./remote-state";
+import {
+  remoteAccountErrorStatus,
+  remoteErrorStatus,
+  remoteSignedInStatus,
+} from "./remote-state";
 import { shouldRetryDesktopLoginAsRegister } from "./desktop-login";
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -39,6 +43,8 @@ export class RemoteHostController {
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private startPromise: Promise<void> | undefined;
   private authPromise: Promise<void> | undefined;
+  private authAbort: AbortController | undefined;
+  private authGeneration = 0;
   private stopRequested = false;
   private unsubscribePending: (() => void) | undefined;
   private readonly promptedSessions = new Set<string>();
@@ -74,30 +80,62 @@ export class RemoteHostController {
   }
 
   async login(provider: RemoteAuthProvider): Promise<RemoteAccountStatus> {
-    if (this.accountStatus.state === "signed_in" && this.runtime?.auth.currentUser)
-      return this.accountStatus;
+    if (
+      this.accountStatus.state === "signed_in" &&
+      this.runtime?.auth.currentUser
+    ) {
+      const status = remoteSignedInStatus(this.runtime.auth.currentUser);
+      this.publishAccountStatus(status);
+      return status;
+    }
     if (this.authPromise) {
       await this.authPromise;
       return this.accountStatus;
     }
     this.publishAccountStatus({ state: "signing_in" });
     this.stopRequested = false;
-    this.authPromise = this.loginInternal(provider);
+    const generation = ++this.authGeneration;
+    const abort = new AbortController();
+    const authPromise = this.loginInternal(provider, generation, abort.signal);
+    this.authAbort = abort;
+    this.authPromise = authPromise;
     try {
-      await this.authPromise;
-      this.publishAccountStatus({ state: "signed_in" });
+      await authPromise;
+      if (generation !== this.authGeneration || abort.signal.aborted)
+        throw new Error("REMOTE_LOGIN_CANCELLED");
+      const user = this.runtime?.auth.currentUser;
+      if (!user) throw new Error("REMOTE_AUTH_FAILED");
+      this.publishAccountStatus(remoteSignedInStatus(user));
     } catch (error) {
-      this.publishAccountStatus(remoteAccountErrorStatus(error));
+      if (generation === this.authGeneration)
+        this.publishAccountStatus(remoteAccountErrorStatus(error));
       throw error;
     } finally {
-      this.authPromise = undefined;
+      if (this.authPromise === authPromise) this.authPromise = undefined;
+      if (this.authAbort === abort) this.authAbort = undefined;
     }
+    return this.accountStatus;
+  }
+
+  async logout(): Promise<RemoteAccountStatus> {
+    this.stopRequested = true;
+    this.authGeneration += 1;
+    this.authAbort?.abort();
+    this.authAbort = undefined;
+    this.authPromise = undefined;
+    await this.stopHostResources();
+    if (this.runtime?.auth.currentUser)
+      await signOut(this.runtime.auth).catch(() => undefined);
+    this.runtime = undefined;
+    this.identity = undefined;
+    this.publishAccountStatus({ state: "signed_out" });
     return this.accountStatus;
   }
 
   async activate(): Promise<RemoteHostStatus> {
     if (this.status.state === "online") return this.status;
-    if (!this.runtime?.auth.currentUser) throw new Error("REMOTE_AUTH_REQUIRED");
+    if (!this.runtime?.auth.currentUser)
+      throw new Error("REMOTE_AUTH_REQUIRED");
     if (this.startPromise) {
       await this.startPromise;
       return this.status;
@@ -123,13 +161,7 @@ export class RemoteHostController {
   }
 
   async stop(): Promise<void> {
-    this.stopRequested = true;
-    await this.stopHostResources();
-    if (this.runtime?.auth.currentUser)
-      await signOut(this.runtime.auth).catch(() => undefined);
-    this.runtime = undefined;
-    this.identity = undefined;
-    this.publishAccountStatus({ state: "signed_out" });
+    await this.logout();
   }
 
   private publishStatus(status: RemoteHostStatus): void {
@@ -154,9 +186,22 @@ export class RemoteHostController {
     }
   }
 
-  private async loginInternal(provider: RemoteAuthProvider): Promise<void> {
+  private async loginInternal(
+    provider: RemoteAuthProvider,
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     const runtime = this.runtime ?? createRemoteFirebaseRuntime();
-    await bootstrapRemoteAuth(runtime, provider);
+    await bootstrapRemoteAuth(runtime, provider, signal);
+    if (
+      signal.aborted ||
+      generation !== this.authGeneration ||
+      this.stopRequested
+    ) {
+      if (runtime.auth.currentUser)
+        await signOut(runtime.auth).catch(() => undefined);
+      throw new Error("REMOTE_LOGIN_CANCELLED");
+    }
     this.runtime = runtime;
   }
 

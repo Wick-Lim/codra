@@ -279,7 +279,8 @@ function RemoteConsoleApp(): ReactElement {
 }
 
 function App(): ReactElement {
-  if (window.location.pathname === "/desktop-auth") return <DesktopAuthBridge />;
+  if (window.location.pathname === "/desktop-auth")
+    return <DesktopAuthBridge />;
   return <RemoteConsoleApp />;
 }
 

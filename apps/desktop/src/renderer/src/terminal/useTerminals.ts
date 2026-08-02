@@ -1,11 +1,16 @@
-import type { CodraDesktopApi, TerminalDescriptor } from "@codra/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type {
+  AgentLaunchRequest,
+  CodraDesktopApi,
+  TerminalDescriptor,
+} from "@codra/protocol";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export interface UseTerminalsResult {
   terminals: TerminalDescriptor[];
   activeTerminalId: string | null;
   activeTerminal: TerminalDescriptor | null;
   createTerminal(): Promise<void>;
+  createAgent(request: AgentLaunchRequest): Promise<void>;
   selectTerminal(terminalId: string): void;
   closeTerminal(terminalId: string): Promise<void>;
 }
@@ -29,25 +34,34 @@ export function useTerminals(
 ): UseTerminalsResult {
   const [terminals, setTerminals] = useState<TerminalDescriptor[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState<string | null>(null);
+  const dismissedTerminalIds = useRef(new Set<string>());
 
   useEffect(() => {
     let mounted = true;
+    let initialLoadPending = true;
     const changedDuringLoad = new Map<string, TerminalDescriptor>();
 
     const stopChanged = api.terminal.onChanged((descriptor) => {
       if (!mounted) return;
-      changedDuringLoad.set(descriptor.id, descriptor);
+      if (dismissedTerminalIds.current.has(descriptor.id)) return;
+      if (initialLoadPending) changedDuringLoad.set(descriptor.id, descriptor);
       setTerminals((current) => replaceDescriptor(current, descriptor));
     });
 
     void api.terminal.list().then((listed) => {
       if (!mounted) return;
-      const loaded = listed.map(
-        (descriptor) => changedDuringLoad.get(descriptor.id) ?? descriptor,
-      );
+      const loaded = listed.flatMap((descriptor) => {
+        if (dismissedTerminalIds.current.has(descriptor.id)) return [];
+        const changed = changedDuringLoad.get(descriptor.id);
+        const current = changed ?? descriptor;
+        return current.state === "exited" && !changed ? [] : [current];
+      });
       for (const changed of changedDuringLoad.values()) {
+        if (dismissedTerminalIds.current.has(changed.id)) continue;
         if (!loaded.some(({ id }) => id === changed.id)) loaded.push(changed);
       }
+      initialLoadPending = false;
+      changedDuringLoad.clear();
       setTerminals(loaded);
       setActiveTerminalId(
         (current) =>
@@ -63,11 +77,35 @@ export function useTerminals(
     };
   }, [api]);
 
+  useEffect(() => {
+    setActiveTerminalId((current) => {
+      if (current && terminals.some(({ id }) => id === current)) return current;
+      return (
+        terminals.find(({ state }) => state === "running")?.id ??
+        terminals[0]?.id ??
+        null
+      );
+    });
+  }, [terminals]);
+
   const createTerminal = useCallback(async () => {
     const descriptor = await api.terminal.create({ cols: 100, rows: 30 });
     setTerminals((current) => replaceDescriptor(current, descriptor));
     setActiveTerminalId(descriptor.id);
   }, [api]);
+
+  const createAgent = useCallback(
+    async (agent: AgentLaunchRequest) => {
+      const descriptor = await api.terminal.create({
+        cols: 100,
+        rows: 30,
+        agent,
+      });
+      setTerminals((current) => replaceDescriptor(current, descriptor));
+      setActiveTerminalId(descriptor.id);
+    },
+    [api],
+  );
 
   const selectTerminal = useCallback((terminalId: string) => {
     setActiveTerminalId(terminalId);
@@ -76,6 +114,11 @@ export function useTerminals(
   const closeTerminal = useCallback(
     async (terminalId: string) => {
       await api.terminal.close(terminalId);
+      dismissedTerminalIds.current.add(terminalId);
+      setTerminals((current) => current.filter(({ id }) => id !== terminalId));
+      setActiveTerminalId((current) =>
+        current === terminalId ? null : current,
+      );
     },
     [api],
   );
@@ -90,6 +133,7 @@ export function useTerminals(
     activeTerminalId,
     activeTerminal,
     createTerminal,
+    createAgent,
     selectTerminal,
     closeTerminal,
   };

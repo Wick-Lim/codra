@@ -179,7 +179,7 @@ if (fixture) {
     .digest("base64");
   const lockText = deployLock.toString("utf8");
   const lockWithProtocolIntegrity = lockText.replace(
-    /(  '@codra\/protocol@file:vendor\/codra-protocol-0\.0\.1\.tgz':\n    resolution: \{integrity: sha512-)[^,]+/u,
+    /( {2}'@codra\/protocol@file:vendor\/codra-protocol-0\.0\.1\.tgz':\n {4}resolution: \{integrity: sha512-)[^,]+/u,
     `$1${protocolIntegrity}`,
   );
   if (lockWithProtocolIntegrity === lockText)

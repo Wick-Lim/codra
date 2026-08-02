@@ -45,8 +45,9 @@ const fake = vi.hoisted(() => {
     documents,
     adminDb: {
       doc,
-      runTransaction: async <T>(callback: (value: typeof transaction) => Promise<T>) =>
-        callback(transaction),
+      runTransaction: async <T>(
+        callback: (value: typeof transaction) => Promise<T>,
+      ) => callback(transaction),
     },
     adminAuth: { createCustomToken: vi.fn(async () => "device-custom-token") },
   };
@@ -81,7 +82,7 @@ type JsonResponse = {
 function response(): JsonResponse {
   return {
     headers: {},
-    on(_event, _listener) {
+    on() {
       return this;
     },
     set(name, value) {
@@ -120,13 +121,19 @@ function googleRequest(data: unknown) {
   };
 }
 
-async function p256Identity(): Promise<{ publicKey: PublicEcJwk; privateKey: JsonWebKey }> {
+async function p256Identity(): Promise<{
+  publicKey: PublicEcJwk;
+  privateKey: JsonWebKey;
+}> {
   const pair = await webcrypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     true,
     ["sign", "verify"],
   );
-  const exportedPublic = await webcrypto.subtle.exportKey("jwk", pair.publicKey);
+  const exportedPublic = await webcrypto.subtle.exportKey(
+    "jwk",
+    pair.publicKey,
+  );
   return {
     publicKey: {
       kty: "EC",
@@ -151,7 +158,8 @@ async function startInput(input: {
   state: string;
   nonce: string;
 }> {
-  const verifier = input.verifier ?? createPkceVerifier(new Uint8Array(32).fill(7));
+  const verifier =
+    input.verifier ?? createPkceVerifier(new Uint8Array(32).fill(7));
   const state = input.state ?? createPkceVerifier(new Uint8Array(32).fill(8));
   const nonce = input.nonce ?? createPkceVerifier(new Uint8Array(32).fill(9));
   const unsigned = {
@@ -205,7 +213,9 @@ async function redeem(input: {
   verifier: string;
   identity: Awaited<ReturnType<typeof p256Identity>>;
 }) {
-  const stored = fake.documents.get(`serverDesktopLoginTransactions/${input.attempt}`)!;
+  const stored = fake.documents.get(
+    `serverDesktopLoginTransactions/${input.attempt}`,
+  )!;
   const request = {
     attemptId: input.attempt,
     code: input.code,
@@ -239,7 +249,9 @@ describe("desktop login transaction Functions", () => {
   it("stores a bounded signed start transaction and rejects a duplicate attempt", async () => {
     const identity = await p256Identity();
     const started = await startAttempt({ identity });
-    const stored = fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`)!;
+    const stored = fake.documents.get(
+      `serverDesktopLoginTransactions/${attemptId}`,
+    )!;
     expect(started.startResponse).toMatchObject({
       attemptId,
       serverNonce: started.nonce,
@@ -259,7 +271,10 @@ describe("desktop login transaction Functions", () => {
     expect(stored).not.toHaveProperty("ownerUid");
 
     const duplicate = response();
-    await desktopLoginStart(rawRequest(started.request) as never, duplicate as never);
+    await desktopLoginStart(
+      rawRequest(started.request) as never,
+      duplicate as never,
+    );
     expect(duplicate.body).toEqual({ error: "LOGIN_ATTEMPT_EXISTS" });
   });
 
@@ -342,7 +357,10 @@ describe("desktop login transaction Functions", () => {
       buildDesktopLoginStartSigningPayload(prepared.request),
     );
     const res = response();
-    await desktopLoginStart(rawRequest(prepared.request) as never, res as never);
+    await desktopLoginStart(
+      rawRequest(prepared.request) as never,
+      res as never,
+    );
     expect(res.body).toEqual({ error: "START_SIGNATURE_INVALID" });
   });
 
@@ -351,17 +369,27 @@ describe("desktop login transaction Functions", () => {
     const started = await startAttempt({ identity });
     await expect(
       authorizeDesktopLogin.run(
-        googleRequest({ action: "inspect", attemptId, state: createPkceVerifier(new Uint8Array(32).fill(2)) }) as never,
+        googleRequest({
+          action: "inspect",
+          attemptId,
+          state: createPkceVerifier(new Uint8Array(32).fill(2)),
+        }) as never,
       ),
     ).rejects.toThrow("LOGIN_STATE_INVALID");
     await expect(
       authorizeDesktopLogin.run(
-        googleRequest({ action: "inspect", attemptId, state: started.state }) as never,
+        googleRequest({
+          action: "inspect",
+          attemptId,
+          state: started.state,
+        }) as never,
       ),
     ).resolves.toMatchObject({ attemptId, displayName: "Jun's MacBook Pro" });
 
     const code = await authorize(attemptId, started.state);
-    const stored = fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`)!;
+    const stored = fake.documents.get(
+      `serverDesktopLoginTransactions/${attemptId}`,
+    )!;
     expect(stored).toMatchObject({
       status: "authorized",
       ownerUid,
@@ -429,7 +457,9 @@ describe("desktop login transaction Functions", () => {
       codraDeviceKind: "host",
       codraDeviceGeneration: 1,
     });
-    expect(fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`)).toMatchObject({
+    expect(
+      fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`),
+    ).toMatchObject({
       status: "consumed",
     });
     const replay = await redeem({
@@ -448,7 +478,9 @@ describe("desktop login transaction Functions", () => {
     const otherIdentity = await p256Identity();
     const started = await startAttempt({ identity });
     const code = await authorize(attemptId, started.state);
-    const stored = fake.documents.get(`serverDesktopLoginTransactions/${attemptId}`)!;
+    const stored = fake.documents.get(
+      `serverDesktopLoginTransactions/${attemptId}`,
+    )!;
     const request = {
       attemptId,
       code,
@@ -485,7 +517,11 @@ describe("desktop login transaction Functions", () => {
       identity,
     });
     const resumeAttempt = "8f30e86f-4cee-4d8b-b0ca-9718207d30de";
-    const resumed = await startAttempt({ identity, action: "resume", attempt: resumeAttempt });
+    const resumed = await startAttempt({
+      identity,
+      action: "resume",
+      attempt: resumeAttempt,
+    });
     const resumeCode = await authorize(resumeAttempt, resumed.state);
     const result = await redeem({
       attempt: resumeAttempt,
@@ -495,7 +531,10 @@ describe("desktop login transaction Functions", () => {
       verifier: resumed.verifier,
       identity,
     });
-    expect(result.body).toMatchObject({ token: "device-custom-token", device: { generation: 1 } });
+    expect(result.body).toMatchObject({
+      token: "device-custom-token",
+      device: { generation: 1 },
+    });
 
     const otherIdentity = await p256Identity();
     const mismatchAttempt = "c7b59b0a-e61e-4d7e-b0c8-eac755a2e252";
@@ -553,7 +592,10 @@ describe("desktop login transaction Functions", () => {
     expect(retry.body).toEqual({ cancelled: true });
     const wrongState = response();
     await desktopLoginCancel(
-      rawRequest({ attemptId, state: createPkceVerifier(new Uint8Array(32).fill(1)) }) as never,
+      rawRequest({
+        attemptId,
+        state: createPkceVerifier(new Uint8Array(32).fill(1)),
+      }) as never,
       wrongState as never,
     );
     expect(wrongState.body).toEqual({ error: "LOGIN_STATE_INVALID" });

@@ -14,6 +14,7 @@ import type {
   TerminalOutputStore,
   TerminalRepository,
 } from "./contracts";
+import { agentTerminalTitle } from "./agent-runtime";
 
 const FINALIZATION_TIMEOUT_MS = 1_000;
 
@@ -96,7 +97,9 @@ export class TerminalManager {
     const cwd = request.cwd ?? homedir();
     const descriptor: TerminalDescriptor = {
       id: randomUUID(),
-      title: "Terminal",
+      title: request.agent
+        ? agentTerminalTitle(request.agent.kind, request.agent.model)
+        : "Terminal",
       cwd,
       cols: request.cols,
       rows: request.rows,
@@ -185,10 +188,16 @@ export class TerminalManager {
   }
 
   async close(terminalId: string): Promise<void> {
-    return this.startFinalization(this.getSession(terminalId), {
-      kind: "close",
-      exitCode: 0,
-    });
+    const session = this.sessions.get(terminalId);
+    if (session) {
+      return this.startFinalization(session, {
+        kind: "close",
+        exitCode: 0,
+      });
+    }
+    const persisted = await this.repository.find(terminalId);
+    if (persisted?.state === "exited") return;
+    throw new TerminalError("TERMINAL_NOT_FOUND");
   }
 
   async closeAll(): Promise<void> {
