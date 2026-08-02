@@ -35,6 +35,10 @@ export default defineConfig(({ command }) => ({
           __dirname,
           "src/main/remote/firebase-production.ts",
         ),
+        "@codra/remote-session-auto-approve": resolve(
+          __dirname,
+          "src/main/remote/session-auto-approve-production.ts",
+        ),
       },
     },
   },

@@ -28,3 +28,13 @@ declare module "@codra/remote-firebase-config" {
     appName?: string,
   ): FirebaseRuntime;
 }
+
+declare module "@codra/remote-session-auto-approve" {
+  import type { SessionApprovalRegistry } from "./session-approval";
+
+  export const remoteSessionAutoApproveBinding: string;
+  export function installSessionAutoApprove(
+    registry: SessionApprovalRegistry,
+    reportError: (error: unknown) => void,
+  ): () => void;
+}

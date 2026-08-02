@@ -64,9 +64,24 @@ assert.equal(desktopPackage.dependencies["@codra/webrtc"], "workspace:*");
 requireText(releaseVite, "safe-storage-electron.ts", "release Vite config");
 requireText(releaseVite, "account-bootstrap-google.ts", "release Vite config");
 requireText(releaseVite, "firebase-production.ts", "release Vite config");
+requireText(
+  releaseVite,
+  "session-auto-approve-production.ts",
+  "release Vite config",
+);
 forbidText(releaseVite, "safe-storage-test-only", "release Vite config");
 forbidText(releaseVite, "demo-codra", "release Vite config");
 forbidText(releaseVite, "signInWithEmailAndPassword", "release Vite config");
+forbidText(
+  releaseVite,
+  "session-auto-approve-test-only",
+  "release Vite config",
+);
+forbidText(
+  releaseVite,
+  "CODRA_REMOTE_TEST_AUTO_APPROVE",
+  "release Vite config",
+);
 
 requireText(remoteVite, "safe-storage-test-only.ts", "remote-test Vite config");
 requireText(
@@ -75,6 +90,11 @@ requireText(
   "remote-test Vite config",
 );
 requireText(remoteVite, "firebase-emulator.ts", "remote-test Vite config");
+requireText(
+  remoteVite,
+  "session-auto-approve-test-only.ts",
+  "remote-test Vite config",
+);
 requireText(remoteVite, "out-remote-test", "remote-test Vite config");
 requireText(webVite, "account-bootstrap-google.ts", "web release Vite config");
 requireText(webVite, "firebase-production.ts", "web release Vite config");
@@ -192,6 +212,8 @@ for (const file of [
   "apps/desktop/src/main/remote/account-bootstrap-test-only.ts",
   "apps/desktop/src/main/remote/firebase-production.ts",
   "apps/desktop/src/main/remote/firebase-emulator.ts",
+  "apps/desktop/src/main/remote/session-auto-approve-production.ts",
+  "apps/desktop/src/main/remote/session-auto-approve-test-only.ts",
   "apps/web/src/remote/account-bootstrap-google.ts",
   "apps/web/src/remote/account-bootstrap-test-only.ts",
   "apps/web/src/remote/firebase-production.ts",

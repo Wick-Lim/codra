@@ -38,6 +38,10 @@ export default defineConfig(({ command }) => ({
           __dirname,
           "src/main/remote/firebase-emulator.ts",
         ),
+        "@codra/remote-session-auto-approve": resolve(
+          __dirname,
+          "src/main/remote/session-auto-approve-test-only.ts",
+        ),
       },
     },
   },

@@ -21,6 +21,13 @@ const mocks = vi.hoisted(() => ({
   ),
   approveRemoteSession: vi.fn(),
   rejectRemoteSession: vi.fn(),
+  installSessionAutoApprove: vi.fn(
+    (registry: unknown, reportError: (error: unknown) => void) => {
+      void registry;
+      void reportError;
+      return (): void => undefined;
+    },
+  ),
 }));
 
 vi.mock("node:os", () => ({ hostname: mocks.hostname }));
@@ -32,6 +39,10 @@ vi.mock("@codra/remote-account-bootstrap", () => ({
 
 vi.mock("@codra/remote-firebase-config", () => ({
   createRemoteFirebaseRuntime: mocks.createRemoteFirebaseRuntime,
+}));
+
+vi.mock("@codra/remote-session-auto-approve", () => ({
+  installSessionAutoApprove: mocks.installSessionAutoApprove,
 }));
 
 vi.mock("firebase/auth", () => ({
@@ -274,6 +285,27 @@ describe("RemoteHostController session approval", () => {
     vi.clearAllMocks();
     mocks.hostname.mockReturnValue("Studio-Mac.local");
     mocks.listHostDevices.mockResolvedValue([]);
+  });
+
+  it("wires the session approval registry into the auto-approve seam", () => {
+    const reportError = vi.fn();
+
+    new RemoteHostController({
+      userDataPath: "/tmp/codra-host-controller-test",
+      reportError,
+    });
+
+    expect(mocks.installSessionAutoApprove).toHaveBeenCalledTimes(1);
+    const [registryArg, reportErrorArg] =
+      mocks.installSessionAutoApprove.mock.calls[0]!;
+    expect(typeof (registryArg as { approve: unknown }).approve).toBe(
+      "function",
+    );
+    expect(typeof (registryArg as { list: unknown }).list).toBe("function");
+
+    const failure = new Error("boom");
+    reportErrorArg(failure);
+    expect(reportError).toHaveBeenCalledWith(failure);
   });
 
   it("registers the device under the resolved host name", async () => {

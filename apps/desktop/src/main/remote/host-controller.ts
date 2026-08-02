@@ -33,6 +33,7 @@ import {
   bootstrapRemoteAuth,
 } from "@codra/remote-account-bootstrap";
 import { createRemoteFirebaseRuntime } from "@codra/remote-firebase-config";
+import { installSessionAutoApprove } from "@codra/remote-session-auto-approve";
 import {
   remoteAccountErrorStatus,
   remoteErrorStatus,
@@ -124,6 +125,9 @@ export class RemoteHostController {
       now: () => Date.now(),
       reportError: (error) => this.options.reportError(error),
     });
+    installSessionAutoApprove(this.sessionApprovals, (error) =>
+      this.options.reportError(error),
+    );
   }
 
   getPendingSessions(): PendingRemoteSession[] {
