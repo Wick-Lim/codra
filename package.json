@@ -29,6 +29,7 @@
     "verify:remote-build-config": "node scripts/verify-remote-build-config.mjs",
     "verify:firebase-indexes": "node scripts/verify-firebase-indexes.mjs",
     "scan:client-artifacts": "node scripts/scan-client-artifacts.mjs",
+    "test:scan-client-artifacts": "node scripts/test-scan-client-artifacts.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint .",
     "format:check": "prettier --check ."

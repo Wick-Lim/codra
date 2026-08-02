@@ -148,6 +148,7 @@ for (const script of [
   "verify:native-package",
   "verify:remote-build-config",
   "verify:firebase-indexes",
+  "scan:client-artifacts",
   "test:firebase-claim-canary",
   "resume:firebase-claim-canary",
 ]) {

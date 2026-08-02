@@ -1,5 +1,115 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "baselineCommit": "d417c313738fd2c5718746428caf5e57b9f4e9df",
-  "purpose": "remote-implementation-secret-scan"
+  "purpose": "remote-implementation-secret-scan",
+  "trees": {
+    "desktop-main": "apps/desktop/out/main",
+    "desktop-preload": "apps/desktop/out/preload",
+    "desktop-renderer": "apps/desktop/out/renderer",
+    "web": "apps/web/dist"
+  },
+  "rules": [
+    {
+      "id": "turn-secret-name",
+      "kind": "literal",
+      "pattern": "CLOUDFLARE_TURN_CONFIG",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "turn-vendor-constant",
+      "kind": "literal",
+      "pattern": "CLOUDFLARE",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "service-account-private-key",
+      "kind": "literal",
+      "pattern": "private_key",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "pem-private-key",
+      "kind": "regex",
+      "pattern": "BEGIN[ _]+(RSA[ _]+)?PRIVATE[ _]+KEY",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "safe-storage-test-alias",
+      "kind": "literal",
+      "pattern": "safe-storage-test-only",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "account-bootstrap-test-alias",
+      "kind": "literal",
+      "pattern": "account-bootstrap-test-only",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "email-password-sign-in",
+      "kind": "literal",
+      "pattern": "signInWithEmailAndPassword",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "remote-test-credential-env",
+      "kind": "literal",
+      "pattern": "CODRA_REMOTE_TEST_EMAIL",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "remote-test-app-id",
+      "kind": "literal",
+      "pattern": "com.codra.desktop.remote-test",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "remote-test-product-name",
+      "kind": "literal",
+      "pattern": "CODRA Remote Test",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "host-bearer-token-field",
+      "kind": "literal",
+      "pattern": "bearerToken",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "signing-key-id-field",
+      "kind": "literal",
+      "pattern": "keyId",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "native-datachannel-module",
+      "kind": "literal",
+      "pattern": "node-datachannel",
+      "trees": ["desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "developer-home-path",
+      "kind": "regex",
+      "pattern": "/Users/[A-Za-z0-9._-]+/",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "source-map-reference",
+      "kind": "literal",
+      "pattern": "sourceMappingURL",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "turn-url",
+      "kind": "regex",
+      "pattern": "\\bturns?://",
+      "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
+    },
+    {
+      "id": "firebase-api-key",
+      "kind": "regex",
+      "pattern": "AIzaSy[0-9A-Za-z_-]{10,}",
+      "trees": ["desktop-preload", "desktop-renderer"]
+    }
+  ]
 }
