@@ -109,6 +109,38 @@ export const RemoteAccountStatusSchema = z.discriminatedUnion("state", [
 ]);
 export type RemoteAccountStatus = z.infer<typeof RemoteAccountStatusSchema>;
 
+export const PendingRemoteSessionSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    clientDeviceId: z.string().uuid(),
+    requesterDisplayName: z.string().min(1).max(200).optional(),
+    requestedScopes: z.array(z.string().min(1).max(80)).min(1).max(16),
+    expiresAt: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export type PendingRemoteSession = z.infer<typeof PendingRemoteSessionSchema>;
+
+export const PendingRemoteSessionListSchema = z
+  .array(PendingRemoteSessionSchema)
+  .max(50);
+
+export const ApproveRemoteSessionRequestSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    approvedScopes: z.array(z.string().min(1).max(80)).min(1).max(16),
+  })
+  .strict();
+export type ApproveRemoteSessionRequest = z.infer<
+  typeof ApproveRemoteSessionRequestSchema
+>;
+
+export const RejectRemoteSessionRequestSchema = z
+  .object({ sessionId: z.string().uuid() })
+  .strict();
+export type RejectRemoteSessionRequest = z.infer<
+  typeof RejectRemoteSessionRequestSchema
+>;
+
 export const IPC_CHANNELS = {
   agentList: "codra:agent:list",
   agentSetup: "codra:agent:setup",
@@ -137,6 +169,10 @@ export const IPC_CHANNELS = {
   remoteDeactivate: "codra:remote:deactivate",
   remoteState: "codra:remote:state",
   remoteAuthState: "codra:remote:auth-state",
+  remoteGetPendingSessions: "codra:remote:get-pending-sessions",
+  remoteApproveSession: "codra:remote:approve-session",
+  remoteRejectSession: "codra:remote:reject-session",
+  remotePendingSessions: "codra:remote:pending-sessions",
 } as const;
 
 export const AgentSetupResultSchema = z.discriminatedUnion("kind", [
@@ -194,6 +230,12 @@ export interface CodraDesktopApi {
     onStateChanged(listener: (status: RemoteHostStatus) => void): () => void;
     onAuthStateChanged(
       listener: (status: RemoteAccountStatus) => void,
+    ): () => void;
+    getPendingSessions(): Promise<PendingRemoteSession[]>;
+    approveSession(request: ApproveRemoteSessionRequest): Promise<void>;
+    rejectSession(request: RejectRemoteSessionRequest): Promise<void>;
+    onPendingSessionsChanged(
+      listener: (sessions: PendingRemoteSession[]) => void,
     ): () => void;
   };
 }

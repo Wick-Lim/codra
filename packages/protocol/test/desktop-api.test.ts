@@ -3,7 +3,11 @@ import {
   AgentTargetConnectRequestSchema,
   AgentTargetRuntimeRequestSchema,
   AgentSetupResultSchema,
+  ApproveRemoteSessionRequestSchema,
   IPC_CHANNELS,
+  PendingRemoteSessionListSchema,
+  PendingRemoteSessionSchema,
+  RejectRemoteSessionRequestSchema,
   RemoteAccountProfileSchema,
   RemoteAccountStateSchema,
   RemoteAccountStatusSchema,
@@ -76,6 +80,66 @@ describe("desktop remote IPC contract", () => {
     expect(IPC_CHANNELS.remoteActivate).toBe("codra:remote:activate");
     expect(IPC_CHANNELS.remoteDeactivate).toBe("codra:remote:deactivate");
     expect(IPC_CHANNELS.remoteLogout).toBe("codra:remote:logout");
+    expect(IPC_CHANNELS.remoteGetPendingSessions).toBe(
+      "codra:remote:get-pending-sessions",
+    );
+    expect(IPC_CHANNELS.remoteApproveSession).toBe(
+      "codra:remote:approve-session",
+    );
+    expect(IPC_CHANNELS.remoteRejectSession).toBe(
+      "codra:remote:reject-session",
+    );
+    expect(IPC_CHANNELS.remotePendingSessions).toBe(
+      "codra:remote:pending-sessions",
+    );
+  });
+
+  it("bounds the pending session approval payloads", () => {
+    const pending = {
+      sessionId: "3f5f0a02-27b0-4a04-9a2f-6cb2f5d6a111",
+      clientDeviceId: "7c9f1d33-4b62-4f0e-9f4c-1c0b7d2a2222",
+      requesterDisplayName: "Studio Mac",
+      requestedScopes: ["workspace.read", "agent.launch"],
+      expiresAt: 1_785_000_000_000,
+    };
+
+    expect(PendingRemoteSessionSchema.parse(pending)).toEqual(pending);
+    expect(PendingRemoteSessionListSchema.parse([pending])).toEqual([pending]);
+    expect(
+      ApproveRemoteSessionRequestSchema.parse({
+        sessionId: pending.sessionId,
+        approvedScopes: ["workspace.read"],
+      }),
+    ).toEqual({
+      sessionId: pending.sessionId,
+      approvedScopes: ["workspace.read"],
+    });
+    expect(
+      RejectRemoteSessionRequestSchema.parse({ sessionId: pending.sessionId }),
+    ).toEqual({ sessionId: pending.sessionId });
+    expect(() =>
+      PendingRemoteSessionSchema.parse({ ...pending, ownerUid: "leak" }),
+    ).toThrow();
+    expect(() =>
+      PendingRemoteSessionSchema.parse({ ...pending, requestedScopes: [] }),
+    ).toThrow();
+    expect(() =>
+      PendingRemoteSessionListSchema.parse(
+        Array.from({ length: 51 }, () => pending),
+      ),
+    ).toThrow();
+    expect(() =>
+      ApproveRemoteSessionRequestSchema.parse({
+        sessionId: pending.sessionId,
+        approvedScopes: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      RejectRemoteSessionRequestSchema.parse({
+        sessionId: pending.sessionId,
+        rejectionReason: "USER_REJECTED",
+      }),
+    ).toThrow();
   });
 
   it("accepts only bounded agent setup results", () => {
