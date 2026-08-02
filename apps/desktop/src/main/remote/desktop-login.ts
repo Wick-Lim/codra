@@ -437,19 +437,39 @@ async function postDesktopLoginJson(
   });
   const payload = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const message =
-      payload && typeof payload === "object"
-        ? (payload as { error?: { message?: unknown } }).error?.message
-        : undefined;
+    const message = desktopLoginResponseErrorMessage(payload);
     if (
       typeof message === "string" &&
       message.toLowerCase().includes("api key not valid")
     ) {
       throw new Error("FIREBASE_API_KEY_INVALID");
     }
-    throw new Error("DESKTOP_LOGIN_FUNCTION_REQUEST_FAILED");
+    throw new Error(
+      desktopLoginResponseErrorCode(payload) ??
+        "DESKTOP_LOGIN_FUNCTION_REQUEST_FAILED",
+    );
   }
   return payload;
+}
+
+function desktopLoginResponseErrorMessage(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") return undefined;
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error === "string") return error;
+  if (!error || typeof error !== "object") return undefined;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? message : undefined;
+}
+
+const DESKTOP_LOGIN_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{2,79}$/u;
+
+export function desktopLoginResponseErrorCode(
+  payload: unknown,
+): string | undefined {
+  const message = desktopLoginResponseErrorMessage(payload)?.trim();
+  return message && DESKTOP_LOGIN_ERROR_CODE_PATTERN.test(message)
+    ? message
+    : undefined;
 }
 
 async function cancelDesktopLogin(

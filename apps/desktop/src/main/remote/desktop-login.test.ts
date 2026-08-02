@@ -15,6 +15,7 @@ import {
   createDesktopLoginDeviceSignaturePayload,
   createDesktopLoginGoogleAuthExchangeRequest,
   createDesktopLoginGoogleAuthUriRequest,
+  desktopLoginResponseErrorCode,
   DESKTOP_LOGIN_CALLBACK_PORT,
   desktopLoginFunctionUrl,
   parseDesktopLoginCallback,
@@ -139,6 +140,20 @@ describe("desktop login loopback", () => {
       deviceId: attemptId,
       keyThumbprint: state,
     });
+  });
+
+  it("extracts bounded raw function error codes", () => {
+    expect(
+      desktopLoginResponseErrorCode({ error: "REDEEM_SIGNATURE_INVALID" }),
+    ).toBe("REDEEM_SIGNATURE_INVALID");
+    expect(
+      desktopLoginResponseErrorCode({
+        error: { message: "LOGIN_NONCE_INVALID" },
+      }),
+    ).toBe("LOGIN_NONCE_INVALID");
+    expect(
+      desktopLoginResponseErrorCode({ error: "private token abc" }),
+    ).toBeUndefined();
   });
 
   it("exchanges the Google callback as the Identity Toolkit POST body", () => {
