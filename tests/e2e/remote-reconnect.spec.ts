@@ -210,7 +210,14 @@ test("resumes a dropped remote session with no lost and no duplicated output", a
     expect(afterBreak).toEqual(
       Array.from({ length: afterBreak.length }, (_, index) => index + 1),
     );
-    expect(afterBreak.length).toBeGreaterThan(beforeBreak.length);
+    // Not just "more than before": the fake agent ticks every 200ms and the
+    // outage held for a deliberate 3s dwell (plus the exited-poll and
+    // reconnect time on top), so at least 15 ticks were produced while the
+    // transport was down and nothing was attached to read them. This pins
+    // the dwell's premise — that output kept accumulating unread during the
+    // outage — rather than merely asserting the stream grew at all, which
+    // would also pass if the outage produced nothing to lose.
+    expect(afterBreak.length).toBeGreaterThanOrEqual(beforeBreak.length + 10);
 
     await client.page.evaluate(
       (id) => window.codra.terminal.write({ terminalId: id, data: "quit\r" }),

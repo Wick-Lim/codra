@@ -252,4 +252,130 @@ describe("ProxyTerminalRouter", () => {
     await router.write({ terminalId, data: "ls\r" });
     expect(peer.write).toHaveBeenCalledWith(terminalId, "ls\r");
   });
+
+  it("clamps a stale duplicate's acknowledgement to the highest cursor already sent", async () => {
+    const { peer, router } = setup();
+    await router.create({
+      target,
+      cwd: "/Users/remote/project",
+      cols: 100,
+      rows: 30,
+      agent,
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    peer.disconnect();
+    await router.resume(target);
+
+    // Advance well past the stale duplicate emitted below.
+    peer.emitOutput({
+      terminalId,
+      cursor: 3n,
+      data: new TextEncoder().encode("two"),
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 6n,
+      data: new TextEncoder().encode("three"),
+    });
+    expect(peer.acknowledge).toHaveBeenLastCalledWith(terminalId, 11n);
+
+    // A stale, already-superseded resend of the very first frame arrives
+    // late — this is what AttachmentPump's re-entrant pump() can produce
+    // under output pressure (see acknowledgeAtLeast's comment). Acking its
+    // own low frameEnd (3n) here would regress the cursor the host has
+    // already recorded; the router must clamp to what it has already sent.
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    expect(peer.acknowledge).toHaveBeenLastCalledWith(terminalId, 11n);
+  });
+
+  it("resets the acknowledgement clamp on resume so a fresh pump's low cursors are accepted", async () => {
+    const { peer, router } = setup();
+    await router.create({
+      target,
+      cwd: "/Users/remote/project",
+      cols: 100,
+      rows: 30,
+      agent,
+    });
+    // Build up a high acknowledgement watermark before the break.
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 3n,
+      data: new TextEncoder().encode("two"),
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 6n,
+      data: new TextEncoder().encode("three"),
+    });
+    expect(peer.acknowledge).toHaveBeenLastCalledWith(terminalId, 11n);
+
+    peer.disconnect();
+    await router.resume(target);
+
+    // The host's fresh pump on resume starts its own bookkeeping back at
+    // cursor 0 — it has no record of this session ever acking up to 11n.
+    // A low-cursor duplicate of the very first frame must be acked at its
+    // own (low) value, not clamped up to the pre-break high-water mark, or
+    // the fresh AttachmentPump would see an ack above its own sentCursor
+    // and throw OUTPUT_CURSOR_INVALID.
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    expect(peer.acknowledge).toHaveBeenLastCalledWith(terminalId, 3n);
+  });
+
+  it("tears the session down on a genuine cursor mismatch rather than absorbing it", async () => {
+    const { local, peer, router } = setup();
+    const changed: TerminalDescriptor[] = [];
+    router.onChanged((descriptor) => changed.push(descriptor));
+    await router.create({
+      target,
+      cwd: "/Users/remote/project",
+      cols: 100,
+      rows: 30,
+      agent,
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+
+    // A frame whose cursor neither matches nextCursor nor falls entirely
+    // within already-seen territory: genuine corruption or desync, not a
+    // replay artifact the acknowledgement clamp is meant to absorb. The
+    // clamp added for resume() must not blind this detector.
+    peer.emitOutput({
+      terminalId,
+      cursor: 100n,
+      data: new TextEncoder().encode("x"),
+    });
+
+    expect(changed.at(-1)).toMatchObject({
+      id: terminalId,
+      state: "exited",
+      exitCode: -1,
+      origin: target,
+    });
+    await expect(router.write({ terminalId, data: "pwd\r" })).rejects.toThrow(
+      "TARGET_DISCONNECTED",
+    );
+    expect(local.write).not.toHaveBeenCalled();
+  });
 });

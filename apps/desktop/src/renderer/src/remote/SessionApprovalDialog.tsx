@@ -11,6 +11,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "terminal.write": "Type into terminals on this Mac",
   "terminal.resize": "Resize terminals on this Mac",
   "terminal.detach": "Detach from terminals on this Mac",
+  "terminal.attach": "Attach to terminals on this Mac",
 };
 
 export interface SessionApprovalDialogProps {
