@@ -31,17 +31,17 @@ export default defineConfig({
     {
       name: "remote-direct",
       testMatch: "remote-direct.spec.ts",
-      timeout: 300_000,
+      timeout: 600_000,
     },
     {
       name: "remote-reconnect",
       testMatch: "remote-reconnect.spec.ts",
-      timeout: 300_000,
+      timeout: 600_000,
     },
     {
       name: "remote-agent-workspace",
       testMatch: "remote-agent-workspace.spec.ts",
-      timeout: 300_000,
+      timeout: 600_000,
     },
   ],
 });

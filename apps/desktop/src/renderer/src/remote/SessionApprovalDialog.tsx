@@ -96,7 +96,8 @@ export function SessionApprovalDialog({
       </section>
       {session.requestedScopes.includes(AGENT_LAUNCH_SCOPE) ? (
         <p className="dialog-footnote">
-          Granting agent.launch lets this device run an agent on this Mac.
+          Granting agent.launch lets this device run an agent on this Mac,
+          possibly with its own tool approvals disabled.
         </p>
       ) : null}
       {error ? (

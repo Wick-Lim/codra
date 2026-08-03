@@ -59,7 +59,6 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 export interface RemoteHostControllerOptions {
   userDataPath: string;
   reportError(error: unknown): void;
-  onPendingSession?(session: RemoteSession): void;
   createPeer?(
     peerName: string,
     iceServers: readonly IceServerInput[],
@@ -83,7 +82,6 @@ export class RemoteHostController {
   private authGeneration = 0;
   private stopRequested = false;
   private unsubscribePending: (() => void) | undefined;
-  private readonly promptedSessions = new Set<string>();
   private readonly terminalOwners = new Map<string, Set<string>>();
   private status: RemoteHostStatus = { state: "idle" };
   private accountStatus: RemoteAccountStatus = { state: "signed_out" };
@@ -387,7 +385,6 @@ export class RemoteHostController {
     this.connector = undefined;
     this.unsubscribePending?.();
     this.unsubscribePending = undefined;
-    this.promptedSessions.clear();
     this.sessionApprovals.clear();
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
@@ -481,9 +478,6 @@ export class RemoteHostController {
         onChange: (sessions) => {
           for (const session of sessions) {
             this.sessionApprovals.handlePending(session);
-            if (this.promptedSessions.has(session.sessionId)) continue;
-            this.promptedSessions.add(session.sessionId);
-            this.options.onPendingSession?.(session);
           }
         },
         onError: (error) => {
@@ -540,7 +534,6 @@ export class RemoteHostController {
       hostChallenge,
       approvalSignature: signature,
     });
-    this.promptedSessions.delete(session.sessionId);
     if (!this.connector) throw new Error("REMOTE_HOST_NOT_STARTED");
     void this.connector
       .acceptHostSession(result)
@@ -583,7 +576,6 @@ export class RemoteHostController {
       rejectionReason,
       rejectionSignature: signature,
     });
-    this.promptedSessions.delete(session.sessionId);
     return result;
   }
 

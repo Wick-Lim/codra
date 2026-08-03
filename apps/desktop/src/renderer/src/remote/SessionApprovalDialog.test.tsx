@@ -40,7 +40,8 @@ describe("SessionApprovalDialog", () => {
     ).toBeChecked();
     expect(
       screen.getByText(
-        "Granting agent.launch lets this device run an agent on this Mac.",
+        "Granting agent.launch lets this device run an agent on this Mac, " +
+          "possibly with its own tool approvals disabled.",
       ),
     ).toBeVisible();
 

@@ -10,6 +10,10 @@ import {
 import type { RemoteDeviceHandle } from "./remote-harness";
 
 test("the harness runs two isolated remote-test devices against the emulators", async () => {
+  test.skip(
+    process.platform !== "darwin",
+    "two-device remote harness is macOS",
+  );
   expect(existsSync("apps/desktop/out-remote-test/main/index.js")).toBe(true);
   const emulators = await startRemoteEmulators();
   const devices: RemoteDeviceHandle[] = [];
