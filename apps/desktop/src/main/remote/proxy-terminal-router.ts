@@ -33,6 +33,7 @@ export interface RemoteAgentPeerPort {
     cols: number,
     rows: number,
   ): Promise<RemoteTerminalDescriptor>;
+  attach(terminalId: string): Promise<void>;
   write(terminalId: string, data: string): Promise<void>;
   resize(terminalId: string, cols: number, rows: number): Promise<void>;
   detach(terminalId: string): Promise<void>;
@@ -52,6 +53,12 @@ interface RemoteProxySession {
   cachedBytes: number;
   nextSequence: number;
   nextCursor?: bigint;
+  // The highest cursor value this router has ever sent back to the peer as
+  // an acknowledgement, for *this* attachment of the peer's AttachmentPump.
+  // Tracked separately from nextCursor (which never regresses and survives
+  // a resume) because acknowledgements must never regress either — see
+  // acknowledgeAtLeast.
+  lastAcknowledged?: bigint;
   connected: boolean;
   visible: boolean;
 }
@@ -69,6 +76,7 @@ function createdAt(value: RemoteTerminalDescriptor["createdAt"]): string {
 export class ProxyTerminalRouter implements LocalTerminalRouterPort {
   private readonly remoteSessions = new Map<string, RemoteProxySession>();
   private readonly remoteTerminalIds = new Set<string>();
+  private readonly resuming = new Set<string>();
   private readonly peerSubscriptions = new Map<
     RemoteAgentPeerPort,
     PeerSubscriptions
@@ -146,6 +154,44 @@ export class ProxyTerminalRouter implements LocalTerminalRouterPort {
     this.earlyFrames.delete(remote.id);
     this.publishChanged(descriptor);
     return descriptor;
+  }
+
+  async resume(target: RemoteAgentExecutionTarget): Promise<void> {
+    const peer = this.resolvePeer(target);
+    this.ensurePeer(peer);
+    for (const [terminalId, session] of this.remoteSessions) {
+      const origin = session.descriptor.origin;
+      if (session.connected || !session.visible) continue;
+      if (origin?.kind !== "remote" || origin.deviceId !== target.deviceId) {
+        continue;
+      }
+      if (this.resuming.has(terminalId)) continue;
+      this.resuming.add(terminalId);
+      session.peer = peer;
+      session.connected = true;
+      // The peer we are attaching to is a brand-new AttachmentPump on the
+      // host, whose own sentCursor starts back at 0 — any ack cursor this
+      // session sent before the break is meaningless to it now. Reset the
+      // monotonic ack tracker so the first ack this session sends after
+      // resuming is bounded only by what the new pump has actually sent
+      // (see acknowledgeAtLeast below), not by a stale high-water mark left
+      // over from the connection that just died.
+      session.lastAcknowledged = undefined;
+      try {
+        await peer.attach(terminalId);
+        session.descriptor = {
+          ...session.descriptor,
+          state: "running",
+          exitCode: undefined,
+        };
+        this.publishChanged(session.descriptor);
+      } catch (error) {
+        this.disconnectSession(session);
+        throw error;
+      } finally {
+        this.resuming.delete(terminalId);
+      }
+    }
   }
 
   async write(request: WriteTerminalRequest): Promise<void> {
@@ -258,7 +304,7 @@ export class ProxyTerminalRouter implements LocalTerminalRouterPort {
     const frameEnd = frame.cursor + BigInt(frame.data.byteLength);
     if (session.nextCursor !== undefined) {
       if (frameEnd <= session.nextCursor) {
-        session.peer.acknowledge(frame.terminalId, session.nextCursor);
+        this.acknowledgeAtLeast(session, frame.terminalId, frameEnd);
         return;
       }
       if (frame.cursor !== session.nextCursor) {
@@ -285,7 +331,42 @@ export class ProxyTerminalRouter implements LocalTerminalRouterPort {
       this.trimReplay(session);
       this.publishOutput(chunk);
     }
-    session.peer.acknowledge(frame.terminalId, frameEnd);
+    this.acknowledgeAtLeast(session, frame.terminalId, frameEnd);
+  }
+
+  // AttachmentPump.pump() re-reads from its own acknowledgedCursor on every
+  // trigger (see packages/webrtc/src/attachment-pump.ts), and the host
+  // processes incoming control messages without serializing them against
+  // one another (DesktopPeerConnector.acceptHostSession's `onMessage`
+  // handler fires `handleHostControl` without awaiting the previous call).
+  // Under output pressure — exactly what a fake agent ticking every 200ms
+  // produces — this lets a *stale* pump() call, still mid-flight on an
+  // earlier (lower) acknowledgedCursor snapshot, resend a range the host
+  // has already sent (and this router has already absorbed) after newer,
+  // higher acknowledgements have already landed. That stale resend reaches
+  // this method again here, and its own frameEnd is genuinely lower than
+  // what this session already told the host. Acking that frameEnd verbatim
+  // would regress the cursor value sent to the host's AttachmentPump,
+  // which throws OUTPUT_CURSOR_INVALID on any cursor below what it already
+  // has recorded as acknowledged (attachment-pump.ts's `acknowledge`) —
+  // tearing the whole session down over what is, on this end, a duplicate
+  // frame it already discarded correctly. Tracking the highest cursor this
+  // session has ever sent and only ever sending forward from there makes
+  // every acknowledgement to the peer monotonic, matching what
+  // AttachmentPump requires, regardless of how many times the same range
+  // gets redelivered or in what order those redeliveries are processed.
+  private acknowledgeAtLeast(
+    session: RemoteProxySession,
+    terminalId: string,
+    cursor: bigint,
+  ): void {
+    const next =
+      session.lastAcknowledged === undefined ||
+      cursor > session.lastAcknowledged
+        ? cursor
+        : session.lastAcknowledged;
+    session.lastAcknowledged = next;
+    session.peer.acknowledge(terminalId, next);
   }
 
   private acceptTerminalChange(

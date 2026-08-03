@@ -417,6 +417,18 @@ export class RemoteAgentChannelClient {
     );
   }
 
+  async attach(terminalId: string): Promise<void> {
+    await this.expectTerminalOk(
+      await this.request({
+        type: "terminal.attach",
+        requestId: randomUUID(),
+        terminalId,
+      }),
+      "terminal.attach",
+      terminalId,
+    );
+  }
+
   async detach(terminalId: string): Promise<void> {
     await this.expectTerminalOk(
       await this.request({
@@ -600,7 +612,11 @@ export class RemoteAgentChannelClient {
 
   private expectTerminalOk(
     message: RemoteControlMessage,
-    operation: "terminal.write" | "terminal.resize" | "terminal.detach",
+    operation:
+      | "terminal.attach"
+      | "terminal.write"
+      | "terminal.resize"
+      | "terminal.detach",
     terminalId: string,
   ): void {
     if (

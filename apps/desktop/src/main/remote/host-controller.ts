@@ -84,6 +84,7 @@ export class RemoteHostController {
   private stopRequested = false;
   private unsubscribePending: (() => void) | undefined;
   private readonly promptedSessions = new Set<string>();
+  private readonly terminalOwners = new Map<string, Set<string>>();
   private status: RemoteHostStatus = { state: "idle" };
   private accountStatus: RemoteAccountStatus = { state: "signed_out" };
   private readonly statusListeners = new Set<
@@ -299,6 +300,7 @@ export class RemoteHostController {
       await signOut(this.runtime.auth).catch(() => undefined);
     this.runtime = undefined;
     this.identity = undefined;
+    this.terminalOwners.clear();
     this.publishAccountStatus({ state: "signed_out" });
     return this.accountStatus;
   }
@@ -461,6 +463,7 @@ export class RemoteHostController {
         runtime: deviceRuntime,
         identity,
         device,
+        terminalOwners: this.terminalOwners,
         createPeer: this.options.createPeer,
         hostServices: () => this.hostServices,
         reportError: this.options.reportError,

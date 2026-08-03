@@ -39,6 +39,7 @@ export const REMOTE_AGENT_SCOPES = [
   "terminal.write",
   "terminal.resize",
   "terminal.detach",
+  "terminal.attach",
 ] as const;
 
 export interface HostWorkspacePort {
@@ -71,6 +72,7 @@ export interface HostControlGatewayOptions {
   outputStore: CursorOutputStore;
   controlSender: HostControlSender;
   terminalSender: BinaryOutputChannel;
+  ownedTerminals?: Set<string>;
   reportError?(error: unknown): void;
 }
 
@@ -192,12 +194,13 @@ export class HostControlGateway {
   private readonly handshake: HandshakeGate;
   private readonly approvedScopes: ReadonlySet<string>;
   private readonly attached = new Map<string, AttachmentPump>();
-  private readonly owned = new Set<string>();
+  private readonly owned: Set<string>;
   private readonly unsubscribeOutput: () => void;
   private readonly unsubscribeChanged: () => void;
   private closed = false;
 
   constructor(private readonly options: HostControlGatewayOptions) {
+    this.owned = options.ownedTerminals ?? new Set<string>();
     this.session = RemoteSessionSchema.parse(options.session);
     if (
       (this.session.status !== "approved" &&
@@ -339,7 +342,6 @@ export class HostControlGateway {
     this.unsubscribeChanged();
     for (const pump of this.attached.values()) pump.close();
     this.attached.clear();
-    this.owned.clear();
   }
 
   private assertHelloBinding(
@@ -475,6 +477,7 @@ export class HostControlGateway {
       }
       case "terminal.attach": {
         this.requireScope("terminal.attach");
+        if (!this.owned.has(message.terminalId)) this.terminalNotFound();
         const exists = (await this.options.manager.list()).some(
           (terminal) => terminal.id === message.terminalId,
         );

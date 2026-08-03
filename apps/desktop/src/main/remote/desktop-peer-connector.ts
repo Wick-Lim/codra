@@ -55,6 +55,7 @@ export interface DesktopPeerConnectorOptions {
   runtime: FirebaseRuntime;
   identity: HostIdentity;
   device: RemoteDevice;
+  terminalOwners: Map<string, Set<string>>;
   createPeer(
     peerName: string,
     iceServers: readonly IceServerInput[],
@@ -177,6 +178,7 @@ export class DesktopPeerConnector {
             listRuntimes: services.listRuntimes,
             manager: services.manager,
             outputStore: services.outputStore,
+            ownedTerminals: this.ownedTerminalsFor(session.clientDeviceId),
             controlSender: {
               send(message) {
                 control.send(encodeRemoteControlMessageBinary(message));
@@ -217,6 +219,14 @@ export class DesktopPeerConnector {
     this.clients.clear();
     this.gateways.clear();
     this.peerSessions.clear();
+  }
+
+  private ownedTerminalsFor(clientDeviceId: string): Set<string> {
+    const existing = this.options.terminalOwners.get(clientDeviceId);
+    if (existing) return existing;
+    const created = new Set<string>();
+    this.options.terminalOwners.set(clientDeviceId, created);
+    return created;
   }
 
   private async createSession(host: RemoteDevice): Promise<RemoteSession> {

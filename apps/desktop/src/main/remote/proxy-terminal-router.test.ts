@@ -71,6 +71,7 @@ class PeerFake implements RemoteAgentPeerPort {
     state: "running",
     createdAt: "2026-08-02T00:00:00.000Z",
   }));
+  readonly attach = vi.fn(async () => undefined);
   readonly write = vi.fn(async () => undefined);
   readonly resize = vi.fn(async () => undefined);
   readonly detach = vi.fn(async () => undefined);
@@ -206,5 +207,49 @@ describe("ProxyTerminalRouter", () => {
       origin: target,
     });
     expect(local.write).not.toHaveBeenCalled();
+  });
+
+  it("resumes a dropped remote terminal and acknowledges replayed frames at their own boundary", async () => {
+    const { peer, router } = setup();
+    const chunks: TerminalOutputChunk[] = [];
+    router.onOutput((chunk) => chunks.push(chunk));
+    await router.create({
+      target,
+      cwd: "/Users/remote/project",
+      cols: 100,
+      rows: 30,
+      agent,
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    peer.disconnect();
+
+    await router.resume(target);
+
+    expect(peer.attach).toHaveBeenCalledWith(terminalId);
+    peer.emitOutput({
+      terminalId,
+      cursor: 0n,
+      data: new TextEncoder().encode("one"),
+    });
+    peer.emitOutput({
+      terminalId,
+      cursor: 3n,
+      data: new TextEncoder().encode("two"),
+    });
+
+    expect(chunks).toEqual([
+      { terminalId, sequence: 1, data: "one" },
+      { terminalId, sequence: 2, data: "two" },
+    ]);
+    expect(peer.acknowledge).toHaveBeenNthCalledWith(2, terminalId, 3n);
+    await expect(
+      router.replay({ terminalId, afterSequence: 0, limit: 10 }),
+    ).resolves.toEqual(chunks);
+    await router.write({ terminalId, data: "ls\r" });
+    expect(peer.write).toHaveBeenCalledWith(terminalId, "ls\r");
   });
 });

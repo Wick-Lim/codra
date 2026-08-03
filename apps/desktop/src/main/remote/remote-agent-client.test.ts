@@ -211,6 +211,25 @@ describe("RemoteAgentChannelClient", () => {
       cursor: "9",
     } satisfies RemoteControlMessage);
   });
+
+  it("re-attaches an existing remote terminal over the control channel", async () => {
+    const { client, control } = await harness();
+    const attach = client.attach(terminalId);
+    await vi.waitFor(() => expect(control.sent).toHaveLength(2));
+    const request = decodeRemoteControlMessage(control.sent.at(-1)!);
+    expect(request).toMatchObject({ type: "terminal.attach", terminalId });
+    if (!("requestId" in request)) throw new Error("missing request id");
+    control.emit(
+      encodeRemoteControlMessageBinary({
+        type: "terminal.ok",
+        requestId: request.requestId,
+        operation: "terminal.attach",
+        result: { terminalId },
+      }),
+    );
+
+    await expect(attach).resolves.toBeUndefined();
+  });
 });
 
 describe("RemoteAgentClient targets", () => {

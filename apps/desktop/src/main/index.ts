@@ -166,8 +166,22 @@ async function startPrimaryInstance(): Promise<void> {
         outputStore: { readFromCursor },
       });
     },
-    createTerminalRouter: (manager) =>
-      new ProxyTerminalRouter(manager, (target) => remoteHost.peerFor(target)),
+    createTerminalRouter: (manager) => {
+      const router = new ProxyTerminalRouter(manager, (target) =>
+        remoteHost.peerFor(target),
+      );
+      remoteHost.onTargetsChanged((targets) => {
+        for (const entry of targets) {
+          if (entry.target.kind !== "remote" || entry.state !== "connected") {
+            continue;
+          }
+          void router
+            .resume(entry.target)
+            .catch((error) => console.error("Remote resume failed", error));
+        }
+      });
+      return router;
+    },
     registerIpc: (options) =>
       registerTerminalIpc({
         ...options,

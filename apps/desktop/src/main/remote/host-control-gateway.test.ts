@@ -158,7 +158,10 @@ function session(scopes: readonly string[]): RemoteSession {
   });
 }
 
-async function createHarness(scopes: readonly string[]) {
+async function createHarness(
+  scopes: readonly string[],
+  ownedTerminals?: Set<string>,
+) {
   const clientKeys = (await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     false,
@@ -219,6 +222,7 @@ async function createHarness(scopes: readonly string[]) {
         terminalFrames.push(frame);
       },
     },
+    ownedTerminals,
   });
 
   async function authorize(overrides: Record<string, unknown> = {}) {
@@ -529,5 +533,41 @@ describe("HostControlGateway", () => {
 
     expect(harness.terminalFrames).toHaveLength(frameCount);
     expect(harness.manager.created).toHaveLength(1);
+  });
+
+  it("attaches only to terminals this client launched, across sessions", async () => {
+    const owned = new Set<string>();
+    const harness = await createHarness(["terminal.attach"], owned);
+    await harness.authorize();
+
+    await harness.gateway.handleControl({
+      type: "terminal.attach",
+      requestId: "attach-unowned",
+      terminalId,
+    });
+    expect(harness.control.at(-1)).toEqual({
+      type: "terminal.error",
+      requestId: "attach-unowned",
+      code: "TERMINAL_NOT_FOUND",
+      message: "TERMINAL_NOT_FOUND",
+    });
+    expect(harness.terminalFrames).toHaveLength(0);
+
+    owned.add(terminalId);
+    await harness.gateway.handleControl({
+      type: "terminal.attach",
+      requestId: "attach-owned",
+      terminalId,
+    });
+    expect(harness.control.at(-1)).toEqual({
+      type: "terminal.ok",
+      requestId: "attach-owned",
+      operation: "terminal.attach",
+      result: { terminalId },
+    });
+    expect(decodeOutputFrameBinary(harness.terminalFrames[0]!)).toMatchObject({
+      terminalId,
+      cursor: 0n,
+    });
   });
 });
