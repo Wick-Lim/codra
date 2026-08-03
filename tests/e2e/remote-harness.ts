@@ -21,23 +21,41 @@ const EMULATOR_PROJECT_ID = "demo-codra";
 const EMULATOR_AUTH_ORIGIN = "http://127.0.0.1:9099";
 const EMULATOR_FIRESTORE_ORIGIN = "http://127.0.0.1:8080";
 const EMULATOR_FUNCTIONS_ORIGIN = "http://127.0.0.1:5001";
+/**
+ * Where `firebase.emulator.json` serves `apps/web/dist-remote-test` from, and
+ * therefore the origin the browser console is opened at. Only reachable when
+ * `startRemoteEmulators({ hosting: true })` asked for the Hosting emulator.
+ */
+export const EMULATOR_HOSTING_ORIGIN = "http://127.0.0.1:5000";
 // packages/firebase/src/index.ts:68 (DEMO_FIREBASE_OPTIONS.apiKey).
 const EMULATOR_API_KEY = "demo-codra-api-key";
 const EMULATOR_READY_TIMEOUT_MS = 300_000;
 const DEVICE_LIVENESS_SETTLE_MS = 1_000;
 
+interface EmulatorPort {
+  port: number;
+  label: string;
+}
+
 // The three ports firebase.json binds the emulators to (127.0.0.1:9099,
 // :8080, :5001). These are baked into the compiled remote-test build (see
 // firebase-emulator.ts in both apps/desktop and apps/web), so they cannot
 // be reassigned per run.
-const REQUIRED_EMULATOR_PORTS: ReadonlyArray<{
-  port: number;
-  label: string;
-}> = [
+const REQUIRED_EMULATOR_PORTS: ReadonlyArray<EmulatorPort> = [
   { port: 9099, label: "auth" },
   { port: 8080, label: "firestore" },
   { port: 5001, label: "functions" },
 ];
+
+// Only the specs that ask for `hosting` bind this one, so it is checked only
+// for them — but it must be checked, because on macOS Control Center's AirPlay
+// Receiver listens on *:5000 out of the box. firebase-tools decides a port is
+// unusable by running `lsof -i :<port> -sTCP:LISTEN` on darwin
+// (emulator/portUtils.js `checkListenable`), which sees that wildcard listener
+// and refuses to start the Hosting emulator on a fixed port. Without this
+// entry the run dies inside firebase-tools with a message about port 5000
+// rather than pointing at what holds it.
+const HOSTING_EMULATOR_PORT: EmulatorPort = { port: 5000, label: "hosting" };
 
 const firebaseBin = path.resolve("node_modules/.bin/firebase");
 const remoteTestMainEntry = path.resolve(
@@ -62,11 +80,16 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function runCommand(command: string, args: readonly string[]): Promise<void> {
+function runCommand(
+  command: string,
+  args: readonly string[],
+  env?: Readonly<Record<string, string>>,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...args], {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
+      ...(env ? { env: { ...process.env, ...env } } : {}),
     });
     let transcript = "";
     child.stdout.setEncoding("utf8");
@@ -172,9 +195,11 @@ async function describePortHolder(port: number): Promise<string | undefined> {
 // problem to fix, not a defect in the harness or in CODRA, so this fails
 // fast and by name rather than surfacing as an opaque emulator-startup
 // error after minutes of build work.
-async function assertEmulatorPortsFree(): Promise<void> {
+async function assertEmulatorPortsFree(
+  required: ReadonlyArray<EmulatorPort>,
+): Promise<void> {
   const conflicts: string[] = [];
-  for (const { port, label } of REQUIRED_EMULATOR_PORTS) {
+  for (const { port, label } of required) {
     if (await isPortFree(port)) continue;
     const holder = await describePortHolder(port);
     conflicts.push(
@@ -184,20 +209,41 @@ async function assertEmulatorPortsFree(): Promise<void> {
   }
   if (conflicts.length === 0) return;
   throw new Error(
-    "The remote-test harness needs ports 9099, 8080, and 5001 free " +
-      "for the Firebase emulators (firebase.json, baked into the " +
-      "compiled remote-test build) but found:\n" +
+    `The remote-test harness needs ports ${required
+      .map(({ port }) => port)
+      .join(", ")} free for the Firebase emulators (firebase.json, baked ` +
+      "into the compiled remote-test build) but found:\n" +
       conflicts.join("\n") +
       "\nThis is a conflict in the local environment, not a CODRA bug " +
       "— free the port(s) above and re-run. Nothing was stopped or " +
-      "signalled automatically.",
+      "signalled automatically. Port 5000 in particular is bound by " +
+      "Control Center on a stock macOS: turn AirPlay Receiver off in " +
+      "System Settings → General → AirDrop & Handoff.",
   );
 }
 
-export async function startRemoteEmulators(): Promise<
-  RemoteEmulators & { stop(): Promise<void> }
-> {
-  await assertEmulatorPortsFree();
+export interface StartRemoteEmulatorsOptions {
+  /**
+   * Also start the Hosting emulator, reading `firebase.emulator.json` so it
+   * serves `apps/web/dist-remote-test` on `EMULATOR_HOSTING_ORIGIN` under the
+   * emulator CSP. Everything except the served tree and that CSP is identical
+   * between the two config files — `scripts/verify-remote-build-config.mjs`
+   * deep-equals the rewrites, the emulator ports, the Firestore block, and the
+   * Functions block — so switching configs changes nothing for the specs that
+   * only need auth, firestore, and functions.
+   */
+  hosting?: boolean;
+}
+
+export async function startRemoteEmulators(
+  options: StartRemoteEmulatorsOptions = {},
+): Promise<RemoteEmulators & { stop(): Promise<void> }> {
+  const hosting = options.hosting === true;
+  await assertEmulatorPortsFree(
+    hosting
+      ? [...REQUIRED_EMULATOR_PORTS, HOSTING_EMULATOR_PORT]
+      : REQUIRED_EMULATOR_PORTS,
+  );
   await runCommand("pnpm", ["--filter", "@codra/protocol", "build"]);
   await runCommand("pnpm", ["--filter", "@codra/functions", "build"]);
   await runCommand("pnpm", ["run", "stage:functions-deploy"]);
@@ -208,17 +254,19 @@ export async function startRemoteEmulators(): Promise<
     "--frozen-lockfile",
   ]);
 
-  // `--only auth,firestore,functions` is mandatory: firebase.json declares a
-  // `hosting` key, and the Hosting emulator is skipped only when that key is
-  // absent (firebase-tools/lib/emulator/controller.js:125-128).
+  // An explicit `--only` is mandatory: both config files declare a `hosting`
+  // key, and the Hosting emulator is skipped only when that key is absent
+  // (firebase-tools/lib/emulator/controller.js:125-128). So a spec that does
+  // not serve the web bundle must leave `hosting` out of this list, or it
+  // would need port 5000 for nothing.
   const child = spawn(
     firebaseBin,
     [
       "emulators:start",
       "--only",
-      "auth,firestore,functions",
+      hosting ? "auth,firestore,functions,hosting" : "auth,firestore,functions",
       "--config",
-      "firebase.json",
+      hosting ? "firebase.emulator.json" : "firebase.json",
       "--project",
       EMULATOR_PROJECT_ID,
     ],
@@ -284,11 +332,49 @@ export async function startRemoteEmulators(): Promise<
   };
 }
 
+export interface RemoteTestCredentials {
+  email: string;
+  password: string;
+}
+
+/**
+ * A fresh emulator account's credentials, before the account exists.
+ *
+ * The web console needs these earlier than the desktop does. `apps/web`'s
+ * `account-bootstrap-test-only.ts` reads the pair from `import.meta.env`, which
+ * Vite substitutes at build time, so the bundle the Hosting emulator serves has
+ * to be built before the Auth emulator is even running — and therefore before
+ * `seedRemoteTestAccount` could have invented a pair of its own.
+ */
+export function newRemoteTestCredentials(): RemoteTestCredentials {
+  return {
+    email: `remote-harness-${randomUUID()}@example.com`,
+    password: `harness-${randomUUID()}`,
+  };
+}
+
+/**
+ * Builds `apps/web/dist-remote-test`, the tree `firebase.emulator.json` serves
+ * on `EMULATOR_HOSTING_ORIGIN`, with the test account baked in.
+ *
+ * Vite's `loadEnv` prefers `process.env` entries carrying the `VITE_` prefix
+ * over any `.env` file, so passing them here is what puts this run's account
+ * into the bundle.
+ */
+export function buildWebConsoleBundle(
+  credentials: RemoteTestCredentials,
+): Promise<void> {
+  return runCommand("pnpm", ["--filter", "@codra/web", "build:remote-test"], {
+    VITE_CODRA_REMOTE_TEST_EMAIL: credentials.email,
+    VITE_CODRA_REMOTE_TEST_PASSWORD: credentials.password,
+  });
+}
+
 export async function seedRemoteTestAccount(
   emulators: RemoteEmulators,
-): Promise<{ email: string; password: string }> {
-  const email = `remote-harness-${randomUUID()}@example.com`;
-  const password = `harness-${randomUUID()}`;
+  credentials: RemoteTestCredentials = newRemoteTestCredentials(),
+): Promise<RemoteTestCredentials> {
+  const { email, password } = credentials;
   const response = await fetch(
     `${emulators.authOrigin}/identitytoolkit.googleapis.com/v1/accounts:signUp?key=${EMULATOR_API_KEY}`,
     {

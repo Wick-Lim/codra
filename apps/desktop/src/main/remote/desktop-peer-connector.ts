@@ -33,13 +33,13 @@ import {
   type HostWorkspacePort,
 } from "./host-control-gateway";
 import type { HostIdentity } from "./host-identity";
-import type { PeerConnectionPort } from "./peer-session";
-import { DesktopPeerSession } from "./peer-session";
+import type { PeerConnectionPort } from "@codra/remote-client";
 import {
+  PeerNegotiationSession,
+  RemoteAgentChannelClient,
   SignedSignalTransport,
   createFirebaseSignalBackend,
-} from "./signal-transport";
-import { RemoteAgentChannelClient } from "./remote-agent-client";
+} from "@codra/remote-client";
 
 const CLIENT_SESSION_LEASE_MS = 15 * 60 * 1000;
 const APPROVAL_WAIT_MAX_MS = 2 * 60 * 1000;
@@ -93,7 +93,7 @@ function iceInputs(
 
 export class DesktopPeerConnector {
   private readonly now: () => number;
-  private readonly peerSessions = new Set<DesktopPeerSession>();
+  private readonly peerSessions = new Set<PeerNegotiationSession>();
   private readonly clients = new Set<RemoteAgentChannelClient>();
   private readonly gateways = new Set<HostControlGateway>();
   private closed = false;
@@ -163,7 +163,7 @@ export class DesktopPeerConnector {
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       let gateway: HostControlGateway | undefined;
-      const peerSession = new DesktopPeerSession({
+      const peerSession = new PeerNegotiationSession({
         role: "host",
         peer: nativePeer,
         signals,
@@ -396,7 +396,7 @@ export class DesktopPeerConnector {
     return new Promise<RemoteAgentChannelClient>((resolve, reject) => {
       let settled = false;
       let client: RemoteAgentChannelClient | undefined;
-      const peerSession = new DesktopPeerSession({
+      const peerSession = new PeerNegotiationSession({
         role: "client",
         peer: nativePeer,
         signals,
@@ -435,7 +435,7 @@ export class DesktopPeerConnector {
 
   private async handleHostControl(
     gateway: HostControlGateway,
-    peerSession: DesktopPeerSession,
+    peerSession: PeerNegotiationSession,
     rawMessage: ArrayBuffer | Uint8Array | string,
   ): Promise<void> {
     try {

@@ -1,8 +1,11 @@
 import {
+  REMOTE_SESSION_MAX_LEASE_MS,
   RemoteSessionSchema,
+  SIGNAL_LEASE_MS,
   SignalSchema,
   buildSignalSigningPayload,
   encodeBase64Url,
+  type RemoteSession,
   type Signal,
 } from "@codra/protocol";
 import { signCanonical, verifyCanonical } from "@codra/webrtc";
@@ -20,7 +23,7 @@ const hostThumbprint = "DwBzhbb51LfusnSGBa_hqYSgo7-j8BTQnip4TOnlzRo";
 const negotiationId = "negotiation-1";
 const now = 1_700_000_000_100;
 
-function approvedSession() {
+function approvedSession(expiresAt: number = now + 60 * 60 * 1000) {
   return RemoteSessionSchema.parse({
     sessionId: "8c2f3a20-9eb7-4d4a-83bd-26f0f171d18f",
     ownerUid: "owner-uid",
@@ -39,7 +42,7 @@ function approvedSession() {
     approvalSignature: "A".repeat(86),
     createdAt: now - 100,
     decidedAt: now - 50,
-    expiresAt: now + 60 * 60 * 1000,
+    expiresAt,
     status: "approved",
   });
 }
@@ -62,7 +65,33 @@ class BackendFake implements SignalTransportBackend {
   }
 }
 
-async function createHarness() {
+/**
+ * Replays `publishSignal` at `functions/src/index.ts:489-504`: the Cloud
+ * Function overwrites `createdAt`, clamps `expiresAt` to
+ * `min(input.expiresAt, serverNow + SIGNAL_LEASE_MS)`, and only *then* verifies
+ * the signature — over the clamped object. `buildSignalSigningPayload` covers
+ * `expiresAtMillis`, so a signed lease past the clamp boundary is rewritten out
+ * from under its own signature and the server answers
+ * `SIGNAL_SIGNATURE_INVALID`.
+ */
+async function replayServerClampThenVerify(
+  signal: Signal,
+  serverNow: number,
+  publicKey: CryptoKey,
+): Promise<boolean> {
+  const clamped = SignalSchema.parse({
+    ...signal,
+    createdAt: serverNow,
+    expiresAt: Math.min(signal.expiresAt, serverNow + SIGNAL_LEASE_MS),
+  });
+  return verifyCanonical(
+    publicKey,
+    clamped.signature,
+    buildSignalSigningPayload(clamped),
+  );
+}
+
+async function createHarness(session: RemoteSession = approvedSession()) {
   const clientKeys = (await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
     false,
@@ -75,7 +104,7 @@ async function createHarness() {
   )) as CryptoKeyPair;
   const backend = new BackendFake();
   const transport = new SignedSignalTransport({
-    session: approvedSession(),
+    session,
     negotiationId,
     local: {
       deviceId: clientDeviceId,
@@ -190,5 +219,60 @@ describe("SignedSignalTransport", () => {
     await expect(
       harness.transport.publish({ type: "end-of-candidates" }),
     ).rejects.toThrow("SIGNAL_TRANSPORT_CLOSED");
+  });
+
+  it("never signs a lease longer than SIGNAL_LEASE_MS even when the session lease is the schema maximum", async () => {
+    const harness = await createHarness(
+      approvedSession(now - 100 + REMOTE_SESSION_MAX_LEASE_MS),
+    );
+
+    await harness.transport.publish({ type: "offer", sdp: "v=0 offer" });
+
+    const signal = harness.backend.published[0];
+    expect(signal.createdAt).toBe(now);
+    expect(signal.expiresAt).toBe(now + SIGNAL_LEASE_MS);
+    expect(signal.expiresAt - signal.createdAt).toBeLessThanOrEqual(
+      SIGNAL_LEASE_MS,
+    );
+  });
+
+  it("keeps its signature valid across the publishSignal expiresAt clamp, which runs before verification", async () => {
+    // A 15-minute session lease is what DesktopPeerConnector requests
+    // (CLIENT_SESSION_LEASE_MS), so `session.expiresAt` — not the one-hour
+    // signal lease — is the binding term and the server's clamp is a no-op.
+    const harness = await createHarness(approvedSession(now + 15 * 60 * 1000));
+    await harness.transport.publish({ type: "offer", sdp: "v=0 offer" });
+    const signal = harness.backend.published[0];
+    expect(signal.expiresAt).toBe(now + 15 * 60 * 1000);
+
+    await expect(
+      replayServerClampThenVerify(
+        signal,
+        now - 60_000,
+        harness.clientKeys.publicKey,
+      ),
+    ).resolves.toBe(true);
+
+    // The clamp precedes verification, so a lease one millisecond past the
+    // server's boundary is rewritten and the signature no longer covers what
+    // the server checks. This is why the transport must never emit one.
+    const overLease = {
+      ...signal,
+      expiresAt: signal.createdAt + SIGNAL_LEASE_MS,
+    };
+    const signedOverLease = SignalSchema.parse({
+      ...overLease,
+      signature: await signCanonical(
+        harness.clientKeys.privateKey,
+        buildSignalSigningPayload(SignalSchema.parse(overLease)),
+      ),
+    });
+    await expect(
+      replayServerClampThenVerify(
+        signedOverLease,
+        signal.createdAt - 1,
+        harness.clientKeys.publicKey,
+      ),
+    ).resolves.toBe(false);
   });
 });

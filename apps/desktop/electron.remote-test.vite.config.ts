@@ -21,7 +21,12 @@ export default defineConfig(({ command }) => ({
     },
     plugins: [
       externalizeDepsPlugin({
-        exclude: ["@codra/protocol", "@codra/firebase", "@codra/webrtc"],
+        exclude: [
+          "@codra/protocol",
+          "@codra/firebase",
+          "@codra/remote-client",
+          "@codra/webrtc",
+        ],
       }),
     ],
     resolve: {
@@ -49,7 +54,12 @@ export default defineConfig(({ command }) => ({
     build: { outDir: `${remoteTestOutput}/preload` },
     plugins: [
       externalizeDepsPlugin({
-        exclude: ["@codra/protocol", "@codra/firebase", "@codra/webrtc"],
+        exclude: [
+          "@codra/protocol",
+          "@codra/firebase",
+          "@codra/remote-client",
+          "@codra/webrtc",
+        ],
       }),
     ],
   },

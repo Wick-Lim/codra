@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONTROL_CHANNEL_LABEL,
   TERMINAL_CHANNEL_LABEL,
-  DesktopPeerSession,
+  PeerNegotiationSession,
   type PeerChannelPort,
   type PeerConnectionPort,
   type PeerNegotiationDeadline,
@@ -228,7 +228,7 @@ async function flush(): Promise<void> {
   await new Promise<void>((resolve) => queueMicrotask(resolve));
 }
 
-describe("DesktopPeerSession", () => {
+describe("PeerNegotiationSession", () => {
   it("creates a client offer and publishes local SDP, ICE, and completion", async () => {
     const peer = new PeerFake();
     const signals = new SignalFake();
@@ -238,7 +238,7 @@ describe("DesktopPeerSession", () => {
       terminal: PeerChannelPort;
     }> = [];
     const errors: Error[] = [];
-    const session = new DesktopPeerSession({
+    const session = new PeerNegotiationSession({
       role: "client",
       peer,
       signals,
@@ -277,7 +277,7 @@ describe("DesktopPeerSession", () => {
     const peer = new PeerFake();
     const signals = new SignalFake();
     const errors: Error[] = [];
-    const session = new DesktopPeerSession({
+    const session = new PeerNegotiationSession({
       role: "client",
       peer,
       signals,
@@ -314,7 +314,7 @@ describe("DesktopPeerSession", () => {
       control: PeerChannelPort;
       terminal: PeerChannelPort;
     }> = [];
-    const session = new DesktopPeerSession({
+    const session = new PeerNegotiationSession({
       role: "host",
       peer,
       signals,
@@ -346,7 +346,7 @@ describe("DesktopPeerSession", () => {
     const signals = new SignalFake();
     const deadline = new DeadlineFake();
     const errors: Error[] = [];
-    const session = new DesktopPeerSession({
+    const session = new PeerNegotiationSession({
       role: "client",
       peer,
       signals,
@@ -366,7 +366,7 @@ describe("DesktopPeerSession", () => {
     const timedSignals = new SignalFake();
     const timedDeadline = new DeadlineFake();
     const timedErrors: Error[] = [];
-    const timed = new DesktopPeerSession({
+    const timed = new PeerNegotiationSession({
       role: "host",
       peer: timedPeer,
       signals: timedSignals,
@@ -384,7 +384,7 @@ describe("DesktopPeerSession", () => {
   it("cancels the negotiation deadline only after the peer connects", () => {
     const peer = new PeerFake();
     const deadline = new DeadlineFake();
-    const session = new DesktopPeerSession({
+    const session = new PeerNegotiationSession({
       role: "host",
       peer,
       signals: new SignalFake(),

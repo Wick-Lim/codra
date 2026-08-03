@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   HelloSchema,
   RemoteControlMessageSchema,
@@ -315,7 +314,7 @@ export class RemoteAgentChannelClient {
   async workspaceRoots(): Promise<WorkspaceRoot[]> {
     const response = await this.request({
       type: "workspace.roots",
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
     });
     if (
       response.type !== "workspace.ok" ||
@@ -329,7 +328,7 @@ export class RemoteAgentChannelClient {
   async workspaceList(path: string): Promise<WorkspaceDirectoryPage> {
     const response = await this.request({
       type: "workspace.list",
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
       path,
     });
     if (
@@ -344,7 +343,7 @@ export class RemoteAgentChannelClient {
   async workspaceValidate(path: string): Promise<WorkspaceSelection> {
     const response = await this.request({
       type: "workspace.validate",
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
       path,
     });
     if (
@@ -359,7 +358,7 @@ export class RemoteAgentChannelClient {
   async runtimes(): Promise<AgentRuntime[]> {
     const response = await this.request({
       type: "agent.runtimes",
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
     });
     if (
       response.type !== "agent.ok" ||
@@ -378,7 +377,7 @@ export class RemoteAgentChannelClient {
   ): Promise<RemoteTerminalDescriptor> {
     const response = await this.request({
       type: "agent.launch",
-      requestId: randomUUID(),
+      requestId: crypto.randomUUID(),
       cwd,
       agent,
       cols,
@@ -394,7 +393,7 @@ export class RemoteAgentChannelClient {
     await this.expectTerminalOk(
       await this.request({
         type: "terminal.write",
-        requestId: randomUUID(),
+        requestId: crypto.randomUUID(),
         terminalId,
         data,
       }),
@@ -407,7 +406,7 @@ export class RemoteAgentChannelClient {
     await this.expectTerminalOk(
       await this.request({
         type: "terminal.resize",
-        requestId: randomUUID(),
+        requestId: crypto.randomUUID(),
         terminalId,
         cols,
         rows,
@@ -421,7 +420,7 @@ export class RemoteAgentChannelClient {
     await this.expectTerminalOk(
       await this.request({
         type: "terminal.attach",
-        requestId: randomUUID(),
+        requestId: crypto.randomUUID(),
         terminalId,
       }),
       "terminal.attach",
@@ -433,7 +432,7 @@ export class RemoteAgentChannelClient {
     await this.expectTerminalOk(
       await this.request({
         type: "terminal.detach",
-        requestId: randomUUID(),
+        requestId: crypto.randomUUID(),
         terminalId,
       }),
       "terminal.detach",

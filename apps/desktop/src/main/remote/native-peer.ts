@@ -4,7 +4,7 @@ import {
   type IceServerInput,
 } from "@codra/webrtc";
 import type { DataChannel, PeerConnection, RtcConfig } from "node-datachannel";
-import type { PeerChannelPort, PeerConnectionPort } from "./peer-session";
+import type { PeerChannelPort, PeerConnectionPort } from "@codra/remote-client";
 
 export interface NativeDataChannelModule {
   readonly PeerConnection: new (

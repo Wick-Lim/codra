@@ -45,6 +45,22 @@ async function createFixtureRoot() {
     join(trees.web, "index-clean.js"),
     'Fd="demo-codra",Ge="AIzaSyDqVsIBxX09Gv3WQJSgvE51uU4DfJU4x2o",Hj="1:92715578857:web:6c07f26a4866a1d4d3c778";\n',
   );
+  // `keyId` and `kid` are ordinary JWT/JWK/WebAuthn field names. A vendored
+  // dependency shipping one is not the Cloudflare TURN credential, so
+  // signing-key-id-field must not deny a bare identifier, a property access,
+  // or a shorthand property.
+  await writeFile(
+    join(trees.renderer, "index-jwk.js"),
+    "const keyId = header.kid;\n" +
+      'const signer = { alg: "RS256", keyId };\n' +
+      "export const readKeyId = (jwk) => jwk.keyId ?? jwk.kid;\n",
+  );
+  // Minified dependency shape: an unquoted object key survives minification
+  // as a bare identifier, which is not the serialized form the rule anchors on.
+  await writeFile(
+    join(trees.web, "index-jwk.js"),
+    'Nb=Ob.kid,Pc={alg:"RS256",keyId:Nb};\n',
+  );
   return root;
 }
 
@@ -84,6 +100,24 @@ await writeFile(
   'const alias = "session-auto-approve-test-only";\n' +
     "const flag = process.env.CODRA_REMOTE_TEST_AUTO_APPROVE;\n",
 );
+// The Cloudflare TURN credential's serialized shape
+// (docs/runbooks/cloudflare-turn.md:11), in the two forms it can reach a
+// bundle in. Only the keyId key appears in either, so each denial is
+// attributable to signing-key-id-field alone rather than to the sibling
+// bearerToken rule.
+//
+// Pretty-printed, as the secret is written by hand.
+await writeFile(
+  join(poisonedRoot, "apps/desktop/out/renderer/assets/index-turn-config.js"),
+  'const turnConfig = { "keyId": "e1b0c44298fc1c14" };\n',
+);
+// Inlined by the bundler from a JSON-valued env var, which escapes every
+// inner quote. This is the likelier leak and the one an unescaped anchor
+// would miss.
+await writeFile(
+  join(poisonedRoot, "apps/web/dist/assets/index-turn-config.js"),
+  'const turnConfig = "{\\"keyId\\":\\"e1b0c44298fc1c14\\"}";\n',
+);
 const poisoned = runScanner(poisonedRoot);
 assert.notEqual(poisoned.status, 0, "poisoned client artifacts must be denied");
 assert.match(poisoned.stderr, /firebase-api-key/u);
@@ -91,6 +125,17 @@ assert.match(poisoned.stderr, /turn-url/u);
 assert.match(poisoned.stderr, /turn-secret-name/u);
 assert.match(poisoned.stderr, /session-auto-approve-test-alias/u);
 assert.match(poisoned.stderr, /remote-test-auto-approve-env/u);
+assert.match(
+  poisoned.stderr,
+  /signing-key-id-field apps\/desktop\/out\/renderer\/assets\/index-turn-config\.js/u,
+);
+assert.match(
+  poisoned.stderr,
+  /signing-key-id-field apps\/web\/dist\/assets\/index-turn-config\.js/u,
+);
+// The same run carries both JWK fixtures. No signing-key-id-field denial may
+// name either of them.
+assert.doesNotMatch(poisoned.stderr, /signing-key-id-field \S*index-jwk\.js/u);
 
 const emptyRoot = await mkdtemp(join(tmpdir(), "codra-scan-artifacts-empty-"));
 const unbuilt = runScanner(emptyRoot);

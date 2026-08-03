@@ -89,8 +89,8 @@
     },
     {
       "id": "signing-key-id-field",
-      "kind": "literal",
-      "pattern": "keyId",
+      "kind": "regex",
+      "pattern": "[\"']keyId\\\\*[\"']\\s*:",
       "trees": ["desktop-main", "desktop-preload", "desktop-renderer", "web"]
     },
     {

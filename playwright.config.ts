@@ -43,5 +43,19 @@ export default defineConfig({
       testMatch: "remote-agent-workspace.spec.ts",
       timeout: 600_000,
     },
+    {
+      // The only project that drives a browser rather than Electron: it builds
+      // apps/web's emulator bundle, serves it from the Hosting emulator, and
+      // runs the console against a real desktop host.
+      name: "web-console",
+      testMatch: "web-console.spec.ts",
+      timeout: 600_000,
+      // Actions default to no timeout of their own, so a locator that never
+      // resolves silently consumes the ten minutes above and reports only
+      // "Test timeout exceeded". Bounding them turns that into a named action
+      // with a call log, while staying far above anything this suite's
+      // loopback round trips legitimately need.
+      use: { actionTimeout: 30_000 },
+    },
   ],
 });

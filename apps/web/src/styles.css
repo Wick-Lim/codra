@@ -1,8 +1,61 @@
 :root {
+  --obsidian: #0b0e14;
+  --deck: #111722;
+  --bulkhead: #1a2230;
+  --bulkhead-raised: #202a39;
+  --steel: #303b4b;
+  --steel-soft: #242d3b;
+  --fog: #e3e8ef;
+  --fog-soft: #c3ccd8;
+  --muted: #8491a2;
+  --muted-dim: #5f6b7a;
+  --signal: #91a7ff;
+  --signal-soft: #34446f;
+  --live: #62c7a5;
+  --warning: #d8a25e;
+  --danger: #dc7b7b;
+
+  /* The terminal emulator's palette.
+   *
+   * xterm.js takes its colours as a JavaScript object, so no CSS rule can reach
+   * them; the values have to be handed to the constructor. Declaring them here
+   * and reading them back with `getComputedStyle` (see
+   * `console/WebTerminalPane.tsx`) keeps this stylesheet the one place the web
+   * console's colours are written down.
+   *
+   * Eight of the twenty-one are the instrument-deck tokens above, aliased with
+   * `var()` so that changing a token changes the terminal with it. The other
+   * thirteen — the foreground, the selection, and the parts of the ANSI ramp
+   * with no counterpart in the deck palette — are not derivable from those
+   * fifteen. They exist nowhere else in this repository except
+   * `apps/desktop/src/renderer/src/terminal/TerminalPane.tsx:139-166`, whose
+   * values these reproduce exactly so the two clients render identically. */
+  --terminal-background: var(--obsidian);
+  --terminal-foreground: #dbe1ea;
+  --terminal-cursor: var(--signal);
+  --terminal-cursor-accent: var(--obsidian);
+  --terminal-selection: #2b3858;
+  --terminal-black: var(--deck);
+  --terminal-red: var(--danger);
+  --terminal-green: var(--live);
+  --terminal-yellow: var(--warning);
+  --terminal-blue: #7f9fe3;
+  --terminal-magenta: #b28bd8;
+  --terminal-cyan: #74b7c3;
+  --terminal-white: #c5ced9;
+  --terminal-bright-black: var(--muted-dim);
+  --terminal-bright-red: #ed9292;
+  --terminal-bright-green: #7bd8b8;
+  --terminal-bright-yellow: #e7b875;
+  --terminal-bright-blue: #9ab6f0;
+  --terminal-bright-magenta: #c7a0eb;
+  --terminal-bright-cyan: #91cbd4;
+  --terminal-bright-white: #f1f4f8;
+
   color-scheme: dark;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-  background: #0b1020;
-  color: #f5f7ff;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: var(--obsidian);
+  color: var(--fog);
 }
 * {
   box-sizing: border-box;
@@ -10,9 +63,17 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: radial-gradient(circle at 20% 0%, #1b2d4d 0, #0b1020 45%);
+  background: radial-gradient(
+    circle at 20% 0%,
+    var(--bulkhead-raised) 0,
+    var(--obsidian) 45%
+  );
 }
-button {
+/* Button and heading base rules stay attached to the shell classes below so
+   they cannot leak into surfaces that style their own controls and type. */
+.primary-button,
+.secondary-button,
+.text-button {
   font: inherit;
   cursor: pointer;
 }
@@ -29,13 +90,13 @@ button {
 }
 .login-card {
   width: min(100%, 520px);
-  border: 1px solid #2d4160;
+  border: 1px solid var(--steel);
   border-radius: 24px;
   padding: 42px;
   background: linear-gradient(
     145deg,
-    rgba(35, 63, 97, 0.9),
-    rgba(19, 29, 52, 0.92)
+    color-mix(in srgb, var(--bulkhead-raised) 90%, transparent),
+    color-mix(in srgb, var(--bulkhead) 92%, transparent)
   );
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
 }
@@ -46,8 +107,8 @@ button {
   height: 48px;
   margin-bottom: 32px;
   border-radius: 15px;
-  background: #a5e8c4;
-  color: #0c1b1c;
+  background: var(--signal);
+  color: var(--obsidian);
   font-size: 24px;
   font-weight: 800;
 }
@@ -62,7 +123,7 @@ button {
   width: 100%;
 }
 .login-hint {
-  color: #8295b5;
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
   margin: 14px 0 0;
@@ -79,27 +140,27 @@ button {
 }
 .eyebrow,
 .card-kicker {
-  color: #8ba7d9;
+  color: var(--signal);
   font-size: 11px;
   letter-spacing: 0.18em;
   font-weight: 700;
   margin: 0 0 12px;
 }
-h1 {
+:where(.shell, .login-card) h1 {
   font-size: clamp(28px, 5vw, 54px);
   letter-spacing: -0.04em;
   line-height: 1.02;
   margin: 0;
   max-width: 720px;
 }
-h2 {
+:where(.shell) h2 {
   font-size: clamp(24px, 4vw, 38px);
   letter-spacing: -0.035em;
   line-height: 1.08;
   margin: 0 0 12px;
   max-width: 620px;
 }
-h3 {
+:where(.shell) h3 {
   font-size: 20px;
   margin: 0;
 }
@@ -107,10 +168,10 @@ h3 {
   display: flex;
   align-items: center;
   gap: 9px;
-  border: 1px solid #32435e;
+  border: 1px solid var(--steel);
   border-radius: 999px;
   padding: 9px 14px;
-  color: #c9d8f2;
+  color: var(--fog-soft);
   font-size: 13px;
   white-space: nowrap;
 }
@@ -123,14 +184,14 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #9bb1d1;
+  color: var(--muted);
   font-size: 12px;
 }
 .text-button {
   border: 0;
   padding: 0;
   background: transparent;
-  color: #a5e8c4;
+  color: var(--signal);
   font-size: 12px;
 }
 .text-button:hover:not(:disabled) {
@@ -140,12 +201,12 @@ h3 {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #59d39a;
-  box-shadow: 0 0 16px #59d39a;
+  background: var(--live);
+  box-shadow: 0 0 16px var(--live);
 }
 .hero-card {
   margin-top: 46px;
-  border: 1px solid #2d4160;
+  border: 1px solid var(--steel);
   border-radius: 24px;
   padding: 32px;
   display: flex;
@@ -154,13 +215,13 @@ h3 {
   gap: 24px;
   background: linear-gradient(
     120deg,
-    rgba(35, 63, 97, 0.82),
-    rgba(19, 29, 52, 0.78)
+    color-mix(in srgb, var(--bulkhead-raised) 82%, transparent),
+    color-mix(in srgb, var(--bulkhead) 78%, transparent)
   );
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
 }
 .muted {
-  color: #aebed8;
+  color: var(--fog-soft);
   max-width: 620px;
   line-height: 1.65;
   margin: 0;
@@ -177,18 +238,22 @@ h3 {
     background 0.15s;
 }
 .primary-button {
-  background: #a5e8c4;
-  color: #0c1b1c;
+  background: var(--signal);
+  color: var(--obsidian);
   min-width: 160px;
 }
 .secondary-button {
-  background: #243b5d;
-  color: #dce8fb;
+  background: var(--bulkhead-raised);
+  color: var(--fog);
 }
-button:hover:not(:disabled) {
+.primary-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.text-button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled,
+.text-button:disabled {
   cursor: wait;
   opacity: 0.5;
 }
@@ -200,10 +265,10 @@ button:disabled {
 }
 .panel {
   min-height: 310px;
-  border: 1px solid #263957;
+  border: 1px solid var(--steel-soft);
   border-radius: 20px;
   padding: 24px;
-  background: rgba(17, 26, 45, 0.82);
+  background: color-mix(in srgb, var(--deck) 82%, transparent);
 }
 .count {
   display: grid;
@@ -211,12 +276,12 @@ button:disabled {
   min-width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: #1f3556;
-  color: #b8d5ff;
+  background: var(--bulkhead-raised);
+  color: var(--fog-soft);
   font-size: 12px;
 }
 .empty {
-  color: #8496b4;
+  color: var(--muted);
   line-height: 1.7;
   padding: 64px 8px 20px;
   text-align: center;
@@ -230,7 +295,7 @@ button:disabled {
 .host-row,
 .session-row {
   padding: 14px 0;
-  border-top: 1px solid #24344d;
+  border-top: 1px solid var(--steel-soft);
 }
 .host-row {
   justify-content: flex-start;
@@ -241,8 +306,8 @@ button:disabled {
   width: 38px;
   height: 38px;
   border-radius: 12px;
-  color: #9ad6ff;
-  background: #1f3556;
+  color: var(--signal);
+  background: var(--bulkhead-raised);
   font-size: 20px;
 }
 .host-info {
@@ -253,7 +318,7 @@ button:disabled {
 }
 .host-info span,
 .session-row span {
-  color: #8295b5;
+  color: var(--muted);
   font-size: 12px;
 }
 .session-row > div {
@@ -261,13 +326,168 @@ button:disabled {
   gap: 5px;
 }
 .session-status {
-  color: #9ee6bc !important;
+  color: var(--live) !important;
   white-space: nowrap;
 }
 .message {
-  color: #9bb1d1;
+  color: var(--muted);
   font-size: 13px;
   margin: 18px 4px 0;
+}
+
+/* The connected session: workspace picker, then runtime picker, then the
+   terminal the launch produced. One is on stage at a time. */
+.console-stage {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+.picker-panel {
+  border: 1px solid var(--steel-soft);
+  border-radius: 20px;
+  padding: 24px;
+  background: color-mix(in srgb, var(--deck) 82%, transparent);
+}
+.picker-lead {
+  font-size: 13px;
+  margin-bottom: 18px;
+}
+.picker-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--steel-soft);
+}
+.workspace-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-dim);
+}
+.workspace-browser {
+  min-height: 220px;
+  margin-top: 14px;
+}
+.workspace-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--steel-soft);
+  border-radius: 12px;
+  background: var(--bulkhead);
+  color: var(--fog-soft);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-list button:hover:not(:disabled) {
+  border-color: var(--signal-soft);
+  background: var(--bulkhead-raised);
+}
+.workspace-list button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+.workspace-selected {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.workspace-selected span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.workspace-selected strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runtime-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.field-wide,
+.field-inline,
+.runtime-form > .field-hint,
+.runtime-form > .message,
+.runtime-form > .picker-actions {
+  grid-column: 1 / -1;
+}
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--steel);
+  border-radius: 12px;
+  background: var(--bulkhead);
+  color: var(--fog);
+  font: inherit;
+  font-size: 13px;
+}
+.field textarea {
+  resize: vertical;
+  line-height: 1.55;
+}
+.field select:disabled,
+.field textarea:disabled,
+.field input:disabled {
+  opacity: 0.5;
+}
+.field-hint {
+  color: var(--muted-dim);
+  font-size: 11px;
+  margin: 0;
+}
+.terminal-pane,
+.terminal-empty {
+  border: 1px solid var(--steel-soft);
+  border-radius: 20px;
+  background: var(--terminal-background);
+  overflow: hidden;
+}
+.terminal-pane {
+  padding: 14px;
+  height: min(62vh, 620px);
+}
+.terminal-canvas {
+  width: 100%;
+  height: 100%;
+}
+.terminal-empty {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
 }
 @media (max-width: 780px) {
   .shell {
@@ -292,7 +512,19 @@ button:disabled {
   .primary-button {
     width: 100%;
   }
-  .content-grid {
+  .content-grid,
+  .runtime-form {
     grid-template-columns: 1fr;
+  }
+  .picker-panel {
+    padding: 20px;
+  }
+  .picker-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .terminal-pane {
+    height: 60vh;
+    padding: 10px;
   }
 }

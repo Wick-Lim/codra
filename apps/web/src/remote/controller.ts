@@ -29,12 +29,60 @@ import {
 } from "./device-identity";
 import { signCanonical } from "@codra/webrtc";
 
+/**
+ * The scope set a browser console session actually needs, identical to the one
+ * the desktop client requests (`REMOTE_AGENT_SCOPES`,
+ * `apps/desktop/src/main/remote/host-control-gateway.ts:35-43`).
+ *
+ * `terminal.attach` on its own can never produce a working terminal: the host
+ * only permits an attach to a terminal in that client's `owned` set, and
+ * ownership is granted exclusively by `agent.launch` or `terminal.create`
+ * (`host-control-gateway.ts:439`, `:469`). The console launches its own agent,
+ * so `agent.launch` — together with the `workspace.read` and `agent.runtimes`
+ * needed to choose a directory and a runtime first — is what makes the attach
+ * legal.
+ *
+ * `terminal.list` and `terminal.create` are deliberately absent. Neither has an
+ * entry in `SCOPE_LABELS`
+ * (`apps/desktop/src/renderer/src/remote/SessionApprovalDialog.tsx:7-15`), so
+ * requesting either would show the host user a raw scope string in the modal
+ * where they consent. `terminal.list` would also expose terminals this client
+ * may never attach to (`host-control-gateway.ts:449-462`).
+ */
 const DEFAULT_SCOPES = [
-  "terminal.list",
-  "terminal.attach",
+  "workspace.read",
+  "agent.runtimes",
+  "agent.launch",
   "terminal.write",
   "terminal.resize",
-];
+  "terminal.detach",
+  "terminal.attach",
+] as const;
+
+const MIN_SESSION_LEASE_MS = 1_000;
+const DEFAULT_SESSION_LEASE_MS = 30 * 60 * 1000;
+
+/**
+ * Far below `REMOTE_SESSION_MAX_LEASE_MS` (8 h), and deliberately so.
+ *
+ * `publishSignal` clamps every signal's `expiresAt` to
+ * `min(input, now + 3_600_000)` and only *then* verifies a signature that
+ * covers `expiresAtMillis` (`functions/src/index.ts:489-504`), so a lease at or
+ * beyond one hour is rewritten out from under its own signature and comes back
+ * as `SIGNAL_SIGNATURE_INVALID`. `SignedSignalTransport` bounds each signal to
+ * `min(session.expiresAt, createdAt + SIGNAL_LEASE_MS)`, which means the
+ * session lease is what decides whether the clamp ever bites.
+ *
+ * The boundary is sharper than "beyond one hour": the clamp uses the *server's*
+ * `now` while the transport signs against the *client's* `createdAt`, so at
+ * exactly one hour a single millisecond of client-ahead clock skew breaks every
+ * signal. 45 minutes leaves a margin no plausible skew crosses. Raising this
+ * without first signing a skew-adjusted lease breaks signalling outright.
+ */
+const MAX_SESSION_LEASE_MS = Math.min(
+  45 * 60 * 1000,
+  REMOTE_SESSION_MAX_LEASE_MS,
+);
 
 export interface BrowserRemoteState {
   runtime: FirebaseRuntime;
@@ -110,8 +158,11 @@ export class BrowserRemoteController {
     const state = await this.connect();
     const scopes = [...(options.scopes ?? DEFAULT_SCOPES)];
     const leaseMs = Math.min(
-      Math.max(options.leaseMs ?? 30 * 60 * 1000, 1_000),
-      REMOTE_SESSION_MAX_LEASE_MS,
+      Math.max(
+        options.leaseMs ?? DEFAULT_SESSION_LEASE_MS,
+        MIN_SESSION_LEASE_MS,
+      ),
+      MAX_SESSION_LEASE_MS,
     );
     const sessionId = crypto.randomUUID();
     const clientChallenge = crypto.randomUUID();
@@ -165,4 +216,4 @@ export class BrowserRemoteController {
   }
 }
 
-export { DEFAULT_SCOPES };
+export { DEFAULT_SCOPES, DEFAULT_SESSION_LEASE_MS, MAX_SESSION_LEASE_MS };

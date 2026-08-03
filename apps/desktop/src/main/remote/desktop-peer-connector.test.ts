@@ -16,7 +16,7 @@ vi.mock("@codra/firebase", async (importOriginal) => ({
   subscribeClientSessions: mocks.subscribeClientSessions,
 }));
 
-vi.mock("./signal-transport", async (importOriginal) => ({
+vi.mock("@codra/remote-client", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createFirebaseSignalBackend: mocks.createFirebaseSignalBackend,
 }));
@@ -34,7 +34,7 @@ import {
 } from "@codra/protocol";
 import { signCanonical } from "@codra/webrtc";
 import type { HostIdentity } from "./host-identity";
-import type { PeerChannelPort, PeerConnectionPort } from "./peer-session";
+import type { PeerChannelPort, PeerConnectionPort } from "@codra/remote-client";
 import { DesktopPeerConnector } from "./desktop-peer-connector";
 
 const FIXED_NOW = 1_700_000_000_000;

@@ -12,7 +12,7 @@ import type { PeerChannelPort } from "./peer-session";
 import {
   RemoteAgentChannelClient,
   RemoteAgentClient,
-} from "./remote-agent-client";
+} from "./agent-channel-client";
 
 const clientDeviceId = "f5c0bc9a-94a7-4af0-8c11-e6b0a5b06a2d";
 const hostDeviceId = "2d19c478-51e8-4eb8-8aa0-a2c9f2aabec1";

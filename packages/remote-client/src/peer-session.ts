@@ -61,7 +61,7 @@ export interface PeerChannels {
   terminal: PeerChannelPort;
 }
 
-export interface DesktopPeerSessionOptions {
+export interface PeerNegotiationSessionOptions {
   role: "client" | "host";
   peer: PeerConnectionPort;
   signals: PeerSignalPort;
@@ -75,7 +75,7 @@ interface RegisteredChannel {
   open: boolean;
 }
 
-export class DesktopPeerSession {
+export class PeerNegotiationSession {
   private readonly deadline: PeerNegotiationDeadline;
   private control: RegisteredChannel | undefined;
   private terminal: RegisteredChannel | undefined;
@@ -83,7 +83,7 @@ export class DesktopPeerSession {
   private closed = false;
   private channelsDelivered = false;
 
-  constructor(private readonly options: DesktopPeerSessionOptions) {
+  constructor(private readonly options: PeerNegotiationSessionOptions) {
     this.deadline = options.deadline ?? new NegotiationDeadline();
     options.peer.onLocalDescription((sdp, type) => {
       this.publishLocalDescription(sdp, type);

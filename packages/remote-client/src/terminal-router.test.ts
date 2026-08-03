@@ -12,7 +12,7 @@ import {
   ProxyTerminalRouter,
   type LocalTerminalRouterPort,
   type RemoteAgentPeerPort,
-} from "./proxy-terminal-router";
+} from "./terminal-router";
 
 const target: RemoteAgentExecutionTarget = {
   kind: "remote",

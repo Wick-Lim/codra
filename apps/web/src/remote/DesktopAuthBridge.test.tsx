@@ -131,15 +131,15 @@ describe("DesktopAuthBridge", () => {
     first.unmount();
 
     render(<DesktopAuthBridgeGoogle onNavigate={replace} />);
-    await screen.findByRole("button", { name: "이 호스트 허용" });
+    // Selected by test id, not by accessible name: the button's label is
+    // translated copy that `src/i18n/messages.ts` owns.
+    await screen.findByTestId("desktop-auth-allow");
     expect(authMocks.authorize).toHaveBeenNthCalledWith(1, {
       action: "inspect",
       attemptId: attempt,
       state,
     });
-    await userEvent.click(
-      screen.getByRole("button", { name: "이 호스트 허용" }),
-    );
+    await userEvent.click(screen.getByTestId("desktop-auth-allow"));
     await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
     expect(replace).toHaveBeenCalledWith(
       `http://127.0.0.1:43123/auth/callback?attempt=${attempt}&code=${code}&state=${state}`,

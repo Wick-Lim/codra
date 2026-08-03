@@ -1,17 +1,16 @@
 import type { ReactElement } from "react";
+import { t } from "../i18n/messages";
+
+const copy = t.desktopAuth;
 
 export default function DesktopAuthBridgeTestOnly(): ReactElement {
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="desktop-auth-title">
-        <div className="brand-mark">C</div>
-        <p className="eyebrow">CODRA / REMOTE TEST</p>
-        <h1 id="desktop-auth-title">
-          데스크톱 Google 로그인은 지원되지 않습니다.
-        </h1>
-        <p className="muted">
-          이 remote-test 빌드는 Firebase Emulator의 테스트 계정 전용입니다.
-        </p>
+        <div className="brand-mark">{copy.brandMark}</div>
+        <p className="eyebrow">{copy.testOnly.eyebrow}</p>
+        <h1 id="desktop-auth-title">{copy.testOnly.title}</h1>
+        <p className="muted">{copy.testOnly.body}</p>
       </section>
     </main>
   );

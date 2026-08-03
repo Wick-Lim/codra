@@ -45,6 +45,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Scan client artifacts
+        run: pnpm scan:client-artifacts
+
       - name: Run development Electron E2E
         run: pnpm test:e2e
 

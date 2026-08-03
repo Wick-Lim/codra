@@ -27,6 +27,7 @@ const [
   releaseBuilder,
   remoteBuilder,
   firebaseJsonText,
+  firebaseEmulatorJsonText,
   webVite,
   webRemoteVite,
   playwrightConfigText,
@@ -39,6 +40,7 @@ const [
   read("apps/desktop/electron-builder.yml"),
   read("apps/desktop/electron-builder.remote-test.yml"),
   read("firebase.json"),
+  read("firebase.emulator.json"),
   read("apps/web/vite.config.ts"),
   read("apps/web/vite.remote-test.config.ts"),
   read("playwright.config.ts"),
@@ -47,6 +49,7 @@ const [
 const rootPackage = JSON.parse(rootPackageText);
 const desktopPackage = JSON.parse(desktopPackageText);
 const firebaseConfig = JSON.parse(firebaseJsonText);
+const firebaseEmulatorConfig = JSON.parse(firebaseEmulatorJsonText);
 
 requireText(workspaceYaml, "- functions", "pnpm-workspace.yaml");
 requireText(workspaceYaml, "node-datachannel: true", "pnpm-workspace.yaml");
@@ -60,6 +63,23 @@ assert.equal(desktopPackage.dependencies.firebase, "12.17.0");
 assert.equal(desktopPackage.dependencies["node-datachannel"], "0.32.3");
 assert.equal(desktopPackage.dependencies["@codra/firebase"], "workspace:*");
 assert.equal(desktopPackage.dependencies["@codra/webrtc"], "workspace:*");
+assert.equal(
+  desktopPackage.dependencies["@codra/remote-client"],
+  "workspace:*",
+);
+
+// Workspace packages ship raw TypeScript, so electron-vite must bundle them
+// rather than leave a runtime `require` the packaged app cannot resolve.
+for (const [config, source] of [
+  [releaseVite, "release Vite config"],
+  [remoteVite, "remote-test Vite config"],
+]) {
+  assert.equal(
+    (config.match(/"@codra\/remote-client",/gu) ?? []).length,
+    2,
+    `${source} must exclude @codra/remote-client from externalizeDepsPlugin in both main and preload`,
+  );
+}
 
 requireText(releaseVite, "safe-storage-electron.ts", "release Vite config");
 requireText(releaseVite, "account-bootstrap-google.ts", "release Vite config");
@@ -160,7 +180,118 @@ assert.deepEqual(firebaseConfig.emulators.hosting, {
 assert.deepEqual(firebaseConfig.hosting.rewrites, [
   { source: "/desktop-auth", destination: "/index.html" },
   { source: "/login", destination: "/index.html" },
+  { source: "**", destination: "/index.html" },
 ]);
+
+// The two Hosting flavours must serve different trees. apps/web builds the
+// production bundle to dist/ and the emulator bundle to dist-remote-test/
+// (apps/web/vite.remote-test.config.ts). Pointing both configs at the same
+// directory is the defect this pair of files exists to prevent: the Hosting
+// emulator on 127.0.0.1:5000 would serve the production bundle aimed at the
+// real project, and a stale emulator build would become deployable.
+assert.equal(firebaseConfig.hosting.public, "apps/web/dist");
+assert.equal(
+  firebaseEmulatorConfig.hosting.public,
+  "apps/web/dist-remote-test",
+);
+forbidText(firebaseJsonText, "dist-remote-test", "firebase.json");
+forbidText(firebaseEmulatorJsonText, "codra-1b3bb", "firebase.emulator.json");
+
+// Everything except the served tree and the CSP is shared, so the emulator
+// config cannot drift into rewriting differently or binding other ports.
+assert.deepEqual(
+  firebaseEmulatorConfig.hosting.rewrites,
+  firebaseConfig.hosting.rewrites,
+  "firebase.emulator.json must carry firebase.json's SPA rewrites verbatim",
+);
+assert.deepEqual(firebaseEmulatorConfig.emulators, firebaseConfig.emulators);
+assert.deepEqual(firebaseEmulatorConfig.firestore, firebaseConfig.firestore);
+assert.deepEqual(firebaseEmulatorConfig.functions, firebaseConfig.functions);
+
+function hostingHeaders(config, source) {
+  const blocks = config.hosting.headers ?? [];
+  assert.deepEqual(
+    blocks.map((block) => block.source),
+    ["**"],
+    `${source} must apply one header block to every hosted path`,
+  );
+  const applied = new Map();
+  for (const block of blocks)
+    for (const header of block.headers) applied.set(header.key, header.value);
+  return applied;
+}
+
+const productionHeaders = hostingHeaders(firebaseConfig, "firebase.json");
+const emulatorHeaders = hostingHeaders(
+  firebaseEmulatorConfig,
+  "firebase.emulator.json",
+);
+const productionCsp = productionHeaders.get("Content-Security-Policy");
+const emulatorCsp = emulatorHeaders.get("Content-Security-Policy");
+
+// A header policy and the meta policy that apps/web/csp-plugin.ts bakes into
+// index.html compose by intersection, so serving the production policy over
+// the emulator bundle would narrow connect-src to 'self' and block every call
+// to the Auth, Firestore, and Functions emulators.
+for (const origin of [
+  "http://127.0.0.1:9099",
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:5001",
+])
+  requireText(emulatorCsp, origin, "firebase.emulator.json CSP");
+for (const productionOnly of [
+  "identitytoolkit.googleapis.com",
+  "securetoken.googleapis.com",
+  "firestore.googleapis.com",
+  "cloudfunctions.net",
+  "apis.google.com",
+])
+  forbidText(emulatorCsp, productionOnly, "firebase.emulator.json CSP");
+forbidText(productionCsp, "127.0.0.1", "firebase.json CSP");
+forbidText(productionCsp, "localhost", "firebase.json CSP");
+forbidText(productionCsp, "http://", "firebase.json CSP");
+
+// frame-ancestors is ignored inside <meta http-equiv>, so both flavours must
+// deliver the clickjacking defence as real response headers.
+for (const [csp, source] of [
+  [productionCsp, "firebase.json CSP"],
+  [emulatorCsp, "firebase.emulator.json CSP"],
+])
+  requireText(csp, "frame-ancestors 'none'", source);
+for (const key of [
+  "Referrer-Policy",
+  "X-Content-Type-Options",
+  "X-Frame-Options",
+])
+  assert.equal(
+    emulatorHeaders.get(key),
+    productionHeaders.get(key),
+    `firebase.emulator.json must mirror firebase.json's ${key}`,
+  );
+
+assert.equal(
+  firebaseEmulatorConfig.auth,
+  undefined,
+  "firebase.emulator.json must not carry an auth block; the Auth emulator ignores it",
+);
+
+// The Hosting emulator can only serve a bundle that exists, and it must read
+// the emulator config rather than the production one.
+requireText(
+  rootPackage.scripts["firebase:emulators"],
+  "pnpm --filter @codra/web build:remote-test",
+  "firebase:emulators script",
+);
+requireText(
+  rootPackage.scripts["firebase:emulators"],
+  "--config firebase.emulator.json",
+  "firebase:emulators script",
+);
+forbidText(
+  rootPackage.scripts["firebase:emulators"],
+  "--config firebase.json",
+  "firebase:emulators script",
+);
 
 for (const script of [
   "firebase:emulators",
@@ -181,12 +312,17 @@ for (const script of [
   );
 }
 
-for (const project of [
+// A Playwright project runs nothing without an explicit testMatch, and a spec
+// nobody can invoke is a spec nobody runs, so each of these needs all three of
+// a project, a testMatch, and a root script naming that project.
+const REMOTE_PLAYWRIGHT_PROJECTS = [
   "remote-harness",
   "remote-direct",
   "remote-reconnect",
   "remote-agent-workspace",
-]) {
+  "web-console",
+];
+for (const project of REMOTE_PLAYWRIGHT_PROJECTS) {
   requireText(playwrightConfigText, `name: "${project}"`, "Playwright config");
   requireText(
     playwrightConfigText,
@@ -201,7 +337,7 @@ for (const project of [
 }
 assert.equal(
   (playwrightConfigText.match(/^ {6}timeout: /gmu) ?? []).length,
-  4,
+  REMOTE_PLAYWRIGHT_PROJECTS.length,
   "each remote Playwright project must set its own timeout",
 );
 
@@ -245,6 +381,36 @@ assert.equal(
 forbidText(readmeText, "does not require an account or login", "README.md");
 forbidText(readmeText, "deferred to a future phase", "README.md");
 requireText(readmeText, "docs/runbooks/remote-access.md", "README.md");
+
+// Production forces `iceTransportPolicy: "relay"` on every session
+// (apps/desktop/src/main/remote/native-peer.ts,
+// apps/web/src/remote/browser-peer.ts), so there is no direct peer path to
+// describe. Both documents claimed one for months; this keeps the claim from
+// growing back. The privacy claim they also make — encrypted end to end, never
+// through the control plane — is true under either topology and is what the
+// two Firestore scans enforce.
+for (const [text, source] of [
+  [readmeText, "README.md"],
+  [remoteRunbook, "remote access runbook"],
+]) {
+  assert.ok(
+    !/direct (peer|WebRTC) connection/iu.test(text),
+    `${source} must not use the phrase "direct peer connection": production ` +
+      'sets iceTransportPolicy: "relay" on every session, so no session has ' +
+      "one. Describe the traffic as relayed and encrypted end to end; if you " +
+      'need to deny the topology, write "no direct path".',
+  );
+}
+requireText(readmeText, 'iceTransportPolicy: "relay"', "README.md");
+requireText(
+  remoteRunbook,
+  "## Every production session is relayed",
+  "remote access runbook",
+);
+// The console is the second client the host serves, and the one property a
+// reader is most likely to assume wrongly.
+requireText(readmeText, "/console", "README.md");
+requireText(readmeText, "launches its own agent", "README.md");
 
 requireText(
   remoteRunbook,

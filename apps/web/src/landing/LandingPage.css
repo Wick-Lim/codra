@@ -1,0 +1,216 @@
+/* The landing page sits outside `.shell` and `.login-card`, so it inherits no
+   heading or button rules from styles.css by design. Everything it needs is
+   here, expressed in the instrument-deck tokens declared on :root. */
+.landing {
+  width: min(1120px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 64px;
+  display: grid;
+  gap: 56px;
+}
+.landing h1 {
+  font-size: clamp(30px, 6vw, 56px);
+  letter-spacing: -0.04em;
+  line-height: 1.04;
+  margin: 0;
+  max-width: 720px;
+}
+.landing h2 {
+  font-size: clamp(21px, 3.4vw, 30px);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 0 0 22px;
+  max-width: 620px;
+}
+.landing h3 {
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+}
+.landing a:focus-visible,
+.landing button:focus-visible {
+  outline: 2px solid var(--fog);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+.landing-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-size: 13px;
+}
+.landing-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: var(--signal);
+  color: var(--obsidian);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.landing-source {
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+  border-bottom: 1px solid var(--steel);
+  padding-bottom: 2px;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.landing-source:hover {
+  color: var(--fog);
+}
+.landing-hero {
+  border: 1px solid var(--steel);
+  border-radius: 24px;
+  padding: clamp(24px, 5vw, 52px);
+  background: linear-gradient(
+    140deg,
+    color-mix(in srgb, var(--bulkhead-raised) 84%, transparent),
+    color-mix(in srgb, var(--bulkhead) 78%, transparent)
+  );
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
+}
+.landing-eyebrow {
+  color: var(--signal);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+  margin: 0 0 14px;
+}
+.landing-lead {
+  margin: 20px 0 0;
+  max-width: 620px;
+  color: var(--fog-soft);
+  font-size: clamp(15px, 2.4vw, 18px);
+  line-height: 1.65;
+}
+.landing-actions {
+  margin-top: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+}
+.landing-cta {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  border-radius: 12px;
+  padding: 14px 22px;
+  font-weight: 700;
+  background: var(--signal);
+  color: var(--obsidian);
+  transition: transform 0.15s;
+}
+.landing-cta:hover {
+  transform: translateY(-1px);
+}
+.landing-note {
+  margin: 0;
+  max-width: 42ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.landing-cards,
+.landing-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.landing-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 16px;
+}
+.landing-card {
+  border: 1px solid var(--steel-soft);
+  border-radius: 18px;
+  padding: 22px;
+  background: color-mix(in srgb, var(--deck) 84%, transparent);
+}
+.landing-steps {
+  display: grid;
+  gap: 16px;
+}
+.landing-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--steel-soft);
+}
+.landing-step:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.landing-step-index {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--signal-soft);
+  color: var(--signal);
+  font-size: 12px;
+  font-weight: 700;
+}
+.landing-step-body {
+  min-width: 0;
+}
+.landing-card p,
+.landing-step p {
+  margin: 0;
+  color: var(--fog-soft);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.landing-footer {
+  border-top: 1px solid var(--steel-soft);
+  padding-top: 22px;
+}
+.landing-footer p {
+  margin: 0;
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+@media (max-width: 560px) {
+  .landing {
+    width: calc(100% - 24px);
+    gap: 40px;
+    padding-bottom: 44px;
+  }
+  .landing-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .landing-cta {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landing *,
+  .landing *::before,
+  .landing *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

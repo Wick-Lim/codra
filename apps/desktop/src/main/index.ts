@@ -27,7 +27,7 @@ import {
   createNativePeerConnection,
   type NativeDataChannelModule,
 } from "./remote/native-peer";
-import { ProxyTerminalRouter } from "./remote/proxy-terminal-router";
+import { ProxyTerminalRouter } from "@codra/remote-client";
 import { WorkspaceService } from "./remote/workspace-service";
 
 let mainWindow: BrowserWindow | undefined;

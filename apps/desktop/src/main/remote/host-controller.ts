@@ -42,7 +42,7 @@ import {
 import { shouldRetryDesktopLoginAsRegister } from "./desktop-login";
 import type { DesktopAuthParentWindowLike } from "./auth-window";
 import type { IceServerInput } from "@codra/webrtc";
-import type { PeerConnectionPort } from "./peer-session";
+import type { PeerConnectionPort } from "@codra/remote-client";
 import {
   DesktopPeerConnector,
   type RemoteHostServices,
@@ -50,7 +50,7 @@ import {
 import {
   RemoteAgentClient,
   type RemoteAgentChannelClient,
-} from "./remote-agent-client";
+} from "@codra/remote-client";
 import { resolveDeviceDisplayName } from "./device-name";
 import { SessionApprovalRegistry } from "./session-approval";
 

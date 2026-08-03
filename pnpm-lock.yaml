@@ -53,6 +53,9 @@ importers:
       '@codra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@codra/remote-client':
+        specifier: workspace:*
+        version: link:../../packages/remote-client
       '@codra/webrtc':
         specifier: workspace:*
         version: link:../../packages/webrtc
@@ -132,6 +135,9 @@ importers:
       '@codra/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@codra/remote-client':
+        specifier: workspace:*
+        version: link:../../packages/remote-client
       '@codra/webrtc':
         specifier: workspace:*
         version: link:../../packages/webrtc
@@ -235,6 +241,28 @@ importers:
       vitest:
         specifier: 4.1.10
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(jsdom@30.0.1(@noble/hashes@2.2.0))(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(yaml@2.9.0))
+
+  packages/remote-client:
+    dependencies:
+      '@codra/firebase':
+        specifier: workspace:*
+        version: link:../firebase
+      '@codra/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@codra/webrtc':
+        specifier: workspace:*
+        version: link:../webrtc
+    devDependencies:
+      '@types/node':
+        specifier: 22.20.1
+        version: 22.20.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.10
+        version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@22.20.1)(jsdom@30.0.1(@noble/hashes@2.2.0))(vite@7.3.6(@types/node@22.20.1)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/webrtc:
     dependencies:
@@ -6121,7 +6149,7 @@ snapshots:
   '@grpc/grpc-js@1.9.16':
     dependencies:
       '@grpc/proto-loader': 0.7.15
-      '@types/node': 24.13.3
+      '@types/node': 22.20.1
 
   '@grpc/proto-loader@0.7.15':
     dependencies:

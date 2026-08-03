@@ -16,6 +16,10 @@ import {
   parseDesktopAuthQuery,
   type DesktopAuthQuery,
 } from "./desktop-auth-contract";
+import { t } from "../i18n/messages";
+
+// Authorization copy, in the default locale. See `src/i18n/messages.ts`.
+const copy = t.desktopAuth;
 
 export {
   createDesktopCallbackNavigation,
@@ -57,19 +61,13 @@ function readRedirectState(): RedirectState | undefined {
   }
 }
 
-function actionLabel(action: "register" | "resume" | "reenable"): string {
-  if (action === "register") return "새 호스트 등록";
-  if (action === "reenable") return "호스트 다시 활성화";
-  return "기존 호스트 다시 연결";
-}
-
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (
     message.includes("auth/api-key-not-valid") ||
     message.includes("API key not valid")
   ) {
-    return "Firebase Web API 키가 유효하지 않습니다. Firebase 콘솔에서 Web 앱 키를 확인해 주세요.";
+    return copy.apiKeyInvalid;
   }
   return message || "DESKTOP_AUTH_FAILED";
 }
@@ -232,35 +230,41 @@ export default function DesktopAuthBridgeGoogle({
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="desktop-auth-title">
-        <div className="brand-mark">C</div>
-        <p className="eyebrow">CODRA / DESKTOP AUTHORIZATION</p>
-        <h1 id="desktop-auth-title">데스크톱 호스트 연결</h1>
+        <div className="brand-mark">{copy.brandMark}</div>
+        <p className="eyebrow">{copy.eyebrow}</p>
+        <h1 id="desktop-auth-title">{copy.title}</h1>
         {!query ? (
           <p className="message" role="alert">
-            이 로그인 요청은 유효하지 않습니다. CODRA 데스크톱에서 다시 시작해
-            주세요.
+            {copy.queryInvalid}
           </p>
         ) : inspection ? (
           <>
+            {/*
+              The host's identity is its own line and the action is a whole
+              sentence about it. The Korean original instead spelled the
+              sentence out across these JSX children — name, then a case
+              particle, then the action as a noun, then a verb ending — which
+              only ever parsed as Korean.
+            */}
             <p className="muted">
               <strong>{inspection.displayName}</strong> (
-              {inspection.fingerprintSuffix})을 {actionLabel(inspection.action)}
-              합니다.
+              {inspection.fingerprintSuffix})
+              <br />
+              {copy.action[inspection.action]}
             </p>
             <button
               className="primary-button login-button"
+              data-testid="desktop-auth-allow"
               onClick={() => void allow()}
               disabled={busy}
             >
-              {busy ? "승인 중…" : "이 호스트 허용"}
+              {busy ? copy.allowBusy : copy.allow}
             </button>
           </>
         ) : (
           <>
             <p className="muted">
-              {busy
-                ? "Google 로그인으로 이동 중…"
-                : "Google 로그인에 실패했습니다. 다시 시도해 주세요."}
+              {busy ? copy.redirecting : copy.signInFailed}
             </p>
             {!busy ? (
               <button
@@ -270,7 +274,7 @@ export default function DesktopAuthBridgeGoogle({
                   void startGoogleSignIn();
                 }}
               >
-                Google 로그인 다시 시도
+                {copy.retry}
               </button>
             ) : null}
           </>

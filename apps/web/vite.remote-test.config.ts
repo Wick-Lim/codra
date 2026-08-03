@@ -1,10 +1,14 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { codraWebCspPlugin } from "./csp-plugin";
+import { codraWebRollupOptions } from "./chunk-strategy";
 
 export default defineConfig({
-  build: { outDir: "dist-remote-test" },
-  plugins: [react()],
+  // Chunked identically to the production config (see ./chunk-strategy.ts), and
+  // likewise without a `sourcemap` key.
+  build: { outDir: "dist-remote-test", rollupOptions: codraWebRollupOptions },
+  plugins: [react(), codraWebCspPlugin("emulator")],
   resolve: {
     alias: {
       "@codra/web-account-bootstrap": resolve(
