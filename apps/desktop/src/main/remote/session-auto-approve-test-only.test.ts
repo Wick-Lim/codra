@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RemoteSession } from "@codra/protocol";
 import { SessionApprovalRegistry } from "./session-approval";
-import { installSessionAutoApprove } from "./session-auto-approve-test-only";
+import {
+  installSessionAutoApprove,
+  seamMarker,
+} from "./session-auto-approve-test-only";
 
 const SESSION_ID = "7f1d3b2a-0c4e-4a9b-9d1e-5c6f7a8b9c0d";
 const CLIENT_DEVICE_ID = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
@@ -43,6 +46,13 @@ function harness() {
 }
 
 describe("installSessionAutoApprove (test-only)", () => {
+  it("exports the artifact-scanner marker matching its own alias", () => {
+    // docs/security/remote-baseline.json's session-auto-approve-test-alias
+    // rule denies this exact literal. Pinning it here catches a rename of
+    // either side (this constant or the alias/rule id) drifting apart.
+    expect(seamMarker).toBe("session-auto-approve-test-only");
+  });
+
   const originalFlag = process.env.CODRA_REMOTE_TEST_AUTO_APPROVE;
 
   afterEach(() => {

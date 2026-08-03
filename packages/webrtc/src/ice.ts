@@ -73,10 +73,17 @@ export function normalizeBrowserIceServers(
     // Cloudflare's TURN key API advertises a fixed bouquet of URL variants
     // per credential set (udp/tcp on 3478, tls on 5349, and firewall-bypass
     // fallbacks including a `:53` variant this client does not support). A
-    // single unsupported variant must not discard the whole credential set
-    // — only fail it once every url in it is unusable, and surface the
-    // error from that last attempt so a genuinely bad single-url input
-    // still fails with its specific reason.
+    // single known-benign unsupported variant must not discard the whole
+    // credential set — only fail it once every url in it is unusable.
+    //
+    // Only TURN_PORT_UNSUPPORTED is tolerated here, and nothing else. Every
+    // other parseTurnUrl failure — wrong host, wrong scheme, malformed
+    // syntax, contradictory transport — is exactly the shape a tampered or
+    // spoofed response would produce (e.g. a rogue `turn:evil.example.com`
+    // mixed in with real Cloudflare urls), so those still abort the whole
+    // entry immediately rather than being silently dropped: staying quiet
+    // about them would make a tampered response indistinguishable from a
+    // healthy one.
     const entries: BrowserIceServer[] = [];
     let lastError: unknown;
     for (const value of urls) {
@@ -89,10 +96,18 @@ export function normalizeBrowserIceServers(
           transport: parsed.transport,
         });
       } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          error.message !== "TURN_PORT_UNSUPPORTED"
+        )
+          throw error;
         lastError = error;
       }
     }
     if (entries.length === 0) {
+      // Only reachable when every url in this entry was the tolerated
+      // TURN_PORT_UNSUPPORTED case (anything else already threw above), so
+      // there is no ambiguity about which failure to surface.
       throw lastError instanceof Error
         ? lastError
         : new Error("TURN_URL_INVALID");

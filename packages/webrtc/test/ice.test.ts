@@ -54,6 +54,44 @@ describe("TURN normalization", () => {
     expect(hostServers[0]?.port).toBe(3478);
   });
 
+  it("does not swallow a tampered host mixed into an otherwise-usable credential set", () => {
+    // Only the specific, known-benign Cloudflare :53 fallback is tolerated.
+    // A rogue url injected alongside real Cloudflare urls (e.g. by a
+    // compromised or spoofed upstream) must still fail the whole entry
+    // closed, exactly as it did before per-url tolerance was introduced —
+    // otherwise silent per-url tolerance plus no server-side logging would
+    // make a tampered response indistinguishable from a healthy one.
+    expect(() =>
+      normalizeBrowserIceServers([
+        {
+          urls: [
+            "turn:turn.cloudflare.com:3478?transport=udp",
+            "turn:evil.example.com:3478?transport=udp",
+          ],
+          username: "u",
+          credential: "p",
+        },
+      ]),
+    ).toThrow("TURN_HOST_UNSUPPORTED");
+  });
+
+  it("still fails closed when every url in a multi-url credential set is the unsupported :53 variant", () => {
+    // Pins the fail-closed rule at the arity that motivated per-url
+    // tolerance (multiple urls), not just the single-url case above.
+    expect(() =>
+      normalizeBrowserIceServers([
+        {
+          urls: [
+            "turn:turn.cloudflare.com:53?transport=udp",
+            "turns:turn.cloudflare.com:53?transport=tcp",
+          ],
+          username: "u",
+          credential: "p",
+        },
+      ]),
+    ).toThrow("TURN_PORT_UNSUPPORTED");
+  });
+
   it("bounds expanded URL lists and rejects contradictory turns transport", () => {
     expect(() =>
       normalizeBrowserIceServers(

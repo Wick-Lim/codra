@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
+import * as logger from "firebase-functions/logger";
 import { defineSecret } from "firebase-functions/params";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { z } from "zod";
@@ -54,6 +55,16 @@ function ambiguousTurnError(): HttpsError {
   return new HttpsError("unavailable", "TURN_GENERATION_AMBIGUOUS");
 }
 
+// The external contract for every failure below is unchanged and
+// deliberate: callers always see the same opaque `TURN_GENERATION_AMBIGUOUS`
+// (see ambiguousTurnError below), never which of these branches fired. The
+// `logger.error` calls exist purely for server-side observability — this is
+// exactly the boundary that let "never worked once" go unnoticed, because
+// nothing distinguished a vendor shape change from a plain 503. Every log
+// payload here is restricted to structural facts (an HTTP status, a zod
+// issue *path*, an entry count, a generic transport-error message) and must
+// never carry `config.bearerToken` or any minted `username`/`credential`
+// value.
 export async function requestCloudflareTurnCredentials(
   config: CloudflareTurnConfig,
   fetchImpl: typeof fetch = fetch,
@@ -74,12 +85,29 @@ export async function requestCloudflareTurnCredentials(
         signal: controller.signal,
       },
     );
-  } catch {
-    throw new Error("TURN_GENERATION_AMBIGUOUS");
+  } catch (error) {
+    logger.error("issueTurnCredentials: transport failure calling Cloudflare", {
+      discriminator: "transport",
+      message: error instanceof Error ? error.message : undefined,
+    });
+    // `cause` is for local Node-side diagnostics only: the outer catch in
+    // issueTurnCredentials always throws a fresh, unrelated HttpsError
+    // (ambiguousTurnError), so this chain never reaches the client.
+    throw new Error("TURN_GENERATION_AMBIGUOUS", { cause: error });
   } finally {
     clearTimeout(timeout);
   }
-  if (response.status !== 201) throw new Error("TURN_GENERATION_AMBIGUOUS");
+  if (response.status !== 201) {
+    logger.error(
+      "issueTurnCredentials: Cloudflare returned an unexpected status",
+      {
+        discriminator: "status",
+        status: response.status,
+      },
+    );
+    throw new Error("TURN_GENERATION_AMBIGUOUS");
+  }
+  let relayServers: CloudflareRelayIceServer[];
   try {
     const parsed = cloudflareResponseSchema.parse(await response.json());
     // The STUN-only entry has no username/credential and uses `stun:` URLs;
@@ -91,15 +119,37 @@ export async function requestCloudflareTurnCredentials(
     // entry it is given). Filter it out here, at the boundary that owns the
     // raw Cloudflare shape, instead of teaching the client to tolerate a
     // server type it will never use.
-    const relayServers = parsed.iceServers.filter(
+    relayServers = parsed.iceServers.filter(
       (entry): entry is CloudflareRelayIceServer =>
         Boolean(entry.username) && Boolean(entry.credential),
     );
-    if (relayServers.length === 0) throw new Error("TURN_GENERATION_AMBIGUOUS");
-    return relayServers;
-  } catch {
+  } catch (error) {
+    logger.error(
+      "issueTurnCredentials: could not parse Cloudflare's response",
+      {
+        discriminator: "parse",
+        kind: error instanceof z.ZodError ? "schema" : "body",
+        // Zod issue *paths* only (e.g. "iceServers.0.urls") — never the
+        // offending value, which could be a real Cloudflare url, username, or
+        // credential. When the body wasn't even valid JSON there is no zod
+        // error to walk, so `issues` is simply absent.
+        issues:
+          error instanceof z.ZodError
+            ? error.issues.map((issue) => issue.path.join("."))
+            : undefined,
+      },
+    );
+    // See the transport catch above: `cause` is local-diagnostics only.
+    throw new Error("TURN_GENERATION_AMBIGUOUS", { cause: error });
+  }
+  if (relayServers.length === 0) {
+    logger.error(
+      "issueTurnCredentials: Cloudflare response had no credentialed TURN entry",
+      { discriminator: "empty-after-filter" },
+    );
     throw new Error("TURN_GENERATION_AMBIGUOUS");
   }
+  return relayServers;
 }
 
 export const issueTurnCredentials = onCall(
