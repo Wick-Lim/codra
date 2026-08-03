@@ -321,6 +321,27 @@ test("runs an agent on the peer's workspace and writes nothing sensitive to Fire
     process.env.PATH = previousPath;
     try {
       await shutdownRemoteDevices(devices);
+      // The scan above runs before the "quit" write and before device
+      // shutdown, so it cannot see a leak written during session
+      // teardown — a summary or final-status record is exactly the kind
+      // of document a well-meaning implementation would be tempted to
+      // write at session close. Re-run the same needle check here, after
+      // devices (and therefore the session and its RTCPeerConnections)
+      // have been torn down but before the emulators themselves stop, to
+      // close that window. The needles are unchanged: prompt, inputToken,
+      // and workspaceRoot are the same values used throughout the run,
+      // and remain the values a teardown-time leak would most plausibly
+      // contain.
+      const teardownDocuments = await scanEveryFirestoreDocument(emulators);
+      for (const needle of [prompt, inputToken, workspaceRoot]) {
+        const leaked = teardownDocuments
+          .filter((document) => document.haystack.includes(needle))
+          .map((document) => document.name);
+        expect(
+          leaked,
+          `Firestore documents leaked ${needle} during teardown`,
+        ).toEqual([]);
+      }
     } finally {
       try {
         await emulators.stop();
