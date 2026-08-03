@@ -1,6 +1,6 @@
 # CODRA
 
-CODRA is a standalone macOS desktop terminal. It runs locally, stores terminal metadata and bounded scrollback on the Mac, and does not require an account or login.
+CODRA is a macOS desktop terminal for running agents in parallel. It runs locally and stores terminal metadata and bounded scrollback on the Mac. Local terminals and local agents need no account. Remote access is an optional layer: sign in with a Google account and one CODRA Mac can browse another Mac's workspaces and launch agents there over a direct WebRTC connection.
 
 ## Local development
 
@@ -47,6 +47,31 @@ pnpm --filter @codra/desktop package:mac
 
 Release signing and notarization credentials are intentionally not configured in the repository.
 
-## Scope
+## Remote access
 
-This phase is local and standalone. Firebase-backed coordination, WebRTC remote terminal transport, and Cloudflare/TURN remote-access infrastructure are deferred to a future phase; no Firebase or Cloudflare configuration is needed to run CODRA locally.
+Remote access is optional and off until you sign in and enable it. When it
+is on, Firebase carries sign-in, device registration, session approval, and
+WebRTC signalling only. Terminal bytes, agent prompts, and workspace paths
+travel exclusively over the direct peer connection between the two Macs; an
+end-to-end test scans every emulator Firestore document to keep that true.
+Cloudflare TURN credentials are issued by a Firebase callable when a direct
+connection is not possible, and the clients never see the Cloudflare token.
+This whole layer is exercised end-to-end against the Firebase and Firestore
+emulators on every change; TURN relay against live Cloudflare is checked
+manually after each deploy rather than by the automated suite.
+
+Running CODRA locally needs no Firebase or Cloudflare configuration.
+
+Operating and deploying the remote layer — sign-in, host activation, device
+registration, session approval, provider configuration, and rollout — is
+documented in `docs/runbooks/remote-access.md`.
+
+The two-device remote suite requires macOS and a JDK for the Firestore
+emulator:
+
+```bash
+pnpm build:remote-test
+pnpm test:remote-direct
+pnpm test:remote-reconnect
+pnpm test:remote-agent-workspace
+```

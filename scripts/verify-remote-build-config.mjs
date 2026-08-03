@@ -230,3 +230,39 @@ for (const file of [
 ]) {
   await access(resolve(root, file));
 }
+
+const [readmeText, remoteRunbook] = await Promise.all([
+  read("README.md"),
+  read("docs/runbooks/remote-access.md"),
+]);
+
+assert.equal(
+  firebaseConfig.auth,
+  undefined,
+  "firebase.json must not carry an auth block; production providers are recorded in docs/runbooks/remote-access.md",
+);
+
+forbidText(readmeText, "does not require an account or login", "README.md");
+forbidText(readmeText, "deferred to a future phase", "README.md");
+requireText(readmeText, "docs/runbooks/remote-access.md", "README.md");
+
+requireText(
+  remoteRunbook,
+  "## Production Identity Platform providers",
+  "remote access runbook",
+);
+requireText(
+  remoteRunbook,
+  "https://codra-1b3bb.firebaseapp.com/__/auth/handler",
+  "remote access runbook",
+);
+requireText(
+  remoteRunbook,
+  "firebase deploy --only functions --project codra-1b3bb",
+  "remote access runbook",
+);
+requireText(
+  remoteRunbook,
+  "firebase deploy --only hosting --project codra-1b3bb",
+  "remote access runbook",
+);
